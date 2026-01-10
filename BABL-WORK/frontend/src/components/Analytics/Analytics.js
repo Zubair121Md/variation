@@ -1,0 +1,1913 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import EnhancedSearchFilter from '../Common/EnhancedSearchFilter';
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  Tabs,
+  Tab,
+  Grid,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Alert,
+  CircularProgress,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Chip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Divider,
+  Autocomplete,
+} from '@mui/material';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
+  Area,
+  AreaChart,
+} from 'recharts';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import {
+  fetchRevenueByPharmacy,
+  fetchRevenueByDoctor,
+  fetchRevenueByRep,
+  fetchRevenueByHQ,
+  fetchRevenueByArea,
+  fetchRevenueByProduct,
+  fetchMonthlyTrends,
+} from '../../store/slices/analyticsSlice';
+import api, { analyticsAPI } from '../../services/api';
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
+
+// Helper function to format currency
+const formatCurrency = (value) => {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+};
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// List View Component
+function RevenueListView({
+  data,
+  title,
+  nameKey,
+  revenueKey,
+  color,
+  extraColumns,
+  valueFormatter = formatCurrency,
+  metricLabel = 'Revenue',
+  showPercentage = true,
+  summaryFormatter,
+  onRowClick,
+}) {
+  if (!data || data.length === 0) {
+    return (
+      <Box>
+        {title && (
+          <Typography variant="h6" gutterBottom>
+            {title}
+          </Typography>
+        )}
+        <Typography color="text.secondary">
+          No data available
+        </Typography>
+      </Box>
+    );
+  }
+
+  const totalValue = data.reduce((sum, item) => sum + (item[revenueKey] || 0), 0);
+  const formattedSummary = summaryFormatter
+    ? summaryFormatter(totalValue)
+    : valueFormatter(totalValue);
+
+  return (
+    <Box>
+      {title && (
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6" gutterBottom>
+            {title}
+          </Typography>
+          <Chip 
+            label={`Total: ${formattedSummary}`}
+            color="primary" 
+            variant="outlined"
+          />
+        </Box>
+      )}
+      
+      {!title && (
+        <Box display="flex" justifyContent="flex-end" alignItems="center" mb={2}>
+          <Chip 
+            label={`Total: ${formattedSummary}`}
+            color="primary" 
+            variant="outlined"
+          />
+        </Box>
+      )}
+        
+        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+          <Table stickyHeader size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell><strong>Rank</strong></TableCell>
+                <TableCell><strong>Name</strong></TableCell>
+                <TableCell align="right"><strong>{metricLabel}</strong></TableCell>
+                {showPercentage && (
+                <TableCell align="right"><strong>% of Total</strong></TableCell>
+                )}
+                {extraColumns?.map((col, idx) => (
+                  <TableCell key={idx} align={col.align || 'left'}>
+                    <strong>{col.label}</strong>
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {data.map((item, index) => {
+                const metricValue = item[revenueKey] || 0;
+                const percentage = totalValue > 0 ? ((metricValue) / totalValue * 100) : 0;
+                const handleClick = () => {
+                  if (onRowClick) {
+                    onRowClick(item);
+                  }
+                };
+                return (
+                  <TableRow
+                    key={index}
+                    hover={!!onRowClick}
+                    onClick={onRowClick ? handleClick : undefined}
+                    sx={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                  >
+                    <TableCell>
+                      <Chip 
+                        label={index + 1} 
+                        size="small" 
+                        color="primary" 
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" noWrap>
+                        {item[nameKey] || item.pharmacy_name || item.doctor_name || item.rep_name || item.hq || item.area || item.name || 'Unknown'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" fontWeight="bold" color={color}>
+                        {valueFormatter(metricValue)}
+                      </Typography>
+                    </TableCell>
+                    {showPercentage && (
+                    <TableCell align="right">
+                      <Typography variant="body2" color="text.secondary">
+                        {percentage.toFixed(1)}%
+                      </Typography>
+                    </TableCell>
+                    )}
+                    {extraColumns?.map((col, idx) => (
+                      <TableCell key={idx} align={col.align || 'left'}>
+                        <Typography variant="body2" noWrap>
+                          {typeof col.value === 'function' ? col.value(item) : (item[col.key] ?? '-')}
+                        </Typography>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+    </Box>
+  );
+}
+
+function TabPanel({ children, value, index, ...other }) {
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`analytics-tabpanel-${index}`}
+      aria-labelledby={`analytics-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+function Analytics() {
+  const dispatch = useDispatch();
+  const {
+    revenueByPharmacy,
+    revenueByDoctor,
+    revenueByRep,
+    revenueByHQ,
+    revenueByArea,
+    revenueByProduct,
+    monthlyTrends,
+    loading,
+    error,
+  } = useSelector((state) => state.analytics);
+
+
+  const [tabValue, setTabValue] = useState(0);
+  const [dateRange, setDateRange] = useState('30');
+  const [startDate, setStartDate] = useState(null);
+  const [endDate, setEndDate] = useState(null);
+  const [useCustomDateRange, setUseCustomDateRange] = useState(false);
+  const [chartType, setChartType] = useState('bar');
+  const [chartTypes, setChartTypes] = useState({
+    0: 'bar', // Pharmacy
+    1: 'pie', // Doctor
+    2: 'bar', // Rep
+    3: 'bar', // HQ
+    4: 'bar', // Area
+    5: 'bar', // Product
+    6: 'area', // Monthly Trends
+    7: 'bar', // Performance Analysis
+    8: 'bar', // Data Quality
+  });
+
+  const [dataQuality, setDataQuality] = useState(null);
+  const [dqLoading, setDqLoading] = useState(false);
+  const [dqError, setDqError] = useState(null);
+  const [breakdownDialogOpen, setBreakdownDialogOpen] = useState(false);
+  const [pharmacyBreakdown, setPharmacyBreakdown] = useState(null);
+  const [doctorBreakdown, setDoctorBreakdown] = useState(null);
+  const [repBreakdown, setRepBreakdown] = useState(null);
+  const [productBreakdown, setProductBreakdown] = useState(null);
+  const [breakdownType, setBreakdownType] = useState('pharmacy'); // 'pharmacy', 'doctor', 'rep', or 'product'
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [breakdownError, setBreakdownError] = useState(null);
+  const [quantityThreshold, setQuantityThreshold] = useState('');
+  const [showLowQuantity, setShowLowQuantity] = useState(false);
+  const [filteredPharmacyData, setFilteredPharmacyData] = useState(null);
+  const [filteredDoctorData, setFilteredDoctorData] = useState(null);
+  const [filteredRepData, setFilteredRepData] = useState(null);
+  const [filteredProductData, setFilteredProductData] = useState(null);
+  const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
+  const [comparisonType, setComparisonType] = useState('period'); // 'period', 'pharmacy', 'doctor', 'product', 'rep'
+  const [comparisonData, setComparisonData] = useState(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState(null);
+  // Period comparison
+  const [period1Start, setPeriod1Start] = useState('');
+  const [period1End, setPeriod1End] = useState('');
+  const [period2Start, setPeriod2Start] = useState('');
+  const [period2End, setPeriod2End] = useState('');
+  // Entity comparison
+  const [entity1Name, setEntity1Name] = useState('');
+  const [entity2Name, setEntity2Name] = useState('');
+
+  const refreshAllAnalytics = useCallback(() => {
+    // Calculate date range based on selection
+    let start = null;
+    let end = null;
+    
+    if (useCustomDateRange && startDate && endDate) {
+      start = startDate;
+      end = endDate;
+    } else if (!useCustomDateRange && dateRange) {
+      const days = parseInt(dateRange);
+      if (!isNaN(days)) {
+        const endDateObj = new Date();
+        const startDateObj = new Date();
+        startDateObj.setDate(endDateObj.getDate() - days);
+        start = startDateObj.toISOString().split('T')[0];
+        end = endDateObj.toISOString().split('T')[0];
+      }
+    }
+    
+    dispatch(fetchRevenueByPharmacy({ startDate: start, endDate: end }));
+    dispatch(fetchRevenueByDoctor({ startDate: start, endDate: end }));
+    dispatch(fetchRevenueByRep({ startDate: start, endDate: end }));
+    dispatch(fetchRevenueByHQ({ startDate: start, endDate: end }));
+    dispatch(fetchRevenueByArea({ startDate: start, endDate: end }));
+    dispatch(fetchRevenueByProduct({ startDate: start, endDate: end }));
+    dispatch(fetchMonthlyTrends());
+  }, [dispatch, dateRange, startDate, endDate, useCustomDateRange]);
+
+  useEffect(() => {
+    refreshAllAnalytics();
+    
+    // Listen for analytics data updates (e.g., after split rule changes)
+    const handleAnalyticsUpdate = () => {
+      console.log('Analytics data updated, refreshing analytics...');
+      refreshAllAnalytics();
+    };
+    
+    window.addEventListener('analyticsDataUpdated', handleAnalyticsUpdate);
+    
+    return () => {
+      window.removeEventListener('analyticsDataUpdated', handleAnalyticsUpdate);
+    };
+  }, [refreshAllAnalytics]);
+
+  useEffect(() => {
+    // Load Data Quality
+    (async () => {
+      try {
+        setDqLoading(true);
+        setDqError(null);
+        const res = await analyticsAPI.getDataQuality();
+        setDataQuality(res.data);
+      } catch (e) {
+        console.error('Data quality error:', e);
+        setDqError(e.response?.data?.detail || e.message || 'Failed to fetch data quality');
+      } finally {
+        setDqLoading(false);
+      }
+    })();
+  }, [dispatch]);
+
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+    setChartType(chartTypes[newValue] || 'bar');
+  };
+
+  const handleChartTypeChange = (event) => {
+    const newChartType = event.target.value;
+    setChartType(newChartType);
+    setChartTypes(prev => ({
+      ...prev,
+      [tabValue]: newChartType
+    }));
+  };
+
+  const handleRefresh = () => {
+    refreshAllAnalytics();
+  };
+
+  const handleCompare = async () => {
+    setComparisonLoading(true);
+    setComparisonError(null);
+    
+    try {
+      const params = {
+        comparison_type: comparisonType,
+      };
+      
+      if (comparisonType === 'period') {
+        if (!period1Start || !period1End || !period2Start || !period2End) {
+          setComparisonError('Please select all date ranges for comparison');
+          setComparisonLoading(false);
+          return;
+        }
+        params.period1_start = period1Start;
+        params.period1_end = period1End;
+        params.period2_start = period2Start;
+        params.period2_end = period2End;
+      } else {
+        if (!entity1Name || !entity2Name) {
+          setComparisonError('Please select both entities for comparison');
+          setComparisonLoading(false);
+          return;
+        }
+        params.entity1_name = entity1Name;
+        params.entity2_name = entity2Name;
+      }
+      
+      const response = await analyticsAPI.compareAnalytics(params);
+      setComparisonData(response.data);
+    } catch (error) {
+      setComparisonError(error.response?.data?.detail || error.message || 'Failed to compare analytics');
+    } finally {
+      setComparisonLoading(false);
+    }
+  };
+
+  const handleExportAll = async () => {
+    try {
+      // Calculate date range based on selection
+      let start = null;
+      let end = null;
+      
+      if (useCustomDateRange && startDate && endDate) {
+        start = startDate;
+        end = endDate;
+      } else if (!useCustomDateRange && dateRange) {
+        const days = parseInt(dateRange);
+        if (!isNaN(days)) {
+          const endDateObj = new Date();
+          const startDateObj = new Date();
+          startDateObj.setDate(endDateObj.getDate() - days);
+          start = startDateObj.toISOString().split('T')[0];
+          end = endDateObj.toISOString().split('T')[0];
+        }
+      }
+      
+      const response = await analyticsAPI.exportAllAnalytics(start, end);
+      
+      // Create blob and download
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const dateRangeStr = start && end ? `_${start}_to_${end}` : '';
+      link.download = `analytics_export${dateRangeStr}_${timestamp}.xlsx`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting analytics:', error);
+      alert('Failed to export analytics. Please try again.');
+    }
+  };
+  
+  const handleCloseBreakdown = () => {
+    setBreakdownDialogOpen(false);
+    setPharmacyBreakdown(null);
+    setDoctorBreakdown(null);
+    setRepBreakdown(null);
+    setProductBreakdown(null);
+    setBreakdownError(null);
+    setBreakdownType('pharmacy');
+  };
+  
+  const renderBreakdownTable = (title, rows, nameLabel = 'Name') => (
+    <Box mb={3}>
+      <Typography variant="subtitle1" gutterBottom>
+        {title}
+      </Typography>
+      {!rows || rows.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No data available
+        </Typography>
+      ) : (
+        <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                <TableCell>{nameLabel}</TableCell>
+                <TableCell align="right">Revenue</TableCell>
+                <TableCell align="right">Quantity</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.map((row, idx) => (
+                <TableRow key={`${title}-${row.name}-${idx}`}>
+                  <TableCell>{row.name || '-'}</TableCell>
+                  <TableCell align="right">{formatCurrency(row.revenue || 0)}</TableCell>
+                  <TableCell align="right">{row.quantity ?? 0}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Box>
+  );
+  
+  const handlePharmacySelect = useCallback(async (pharmacyName) => {
+    if (!pharmacyName) return;
+    setBreakdownType('pharmacy');
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    try {
+      const res = await analyticsAPI.getPharmacyBreakdown(pharmacyName);
+      setPharmacyBreakdown(res.data);
+      setDoctorBreakdown(null);
+      setRepBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || 'Failed to load breakdown';
+      setBreakdownError(message);
+      setPharmacyBreakdown(null);
+      setDoctorBreakdown(null);
+      setRepBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, []);
+
+  const handleDoctorSelect = useCallback(async (doctorName) => {
+    if (!doctorName) return;
+    setBreakdownType('doctor');
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    try {
+      const res = await analyticsAPI.getDoctorBreakdown(doctorName);
+      setDoctorBreakdown(res.data);
+      setPharmacyBreakdown(null);
+      setRepBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || 'Failed to load breakdown';
+      setBreakdownError(message);
+      setDoctorBreakdown(null);
+      setPharmacyBreakdown(null);
+      setRepBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, []);
+
+  const handleRepSelect = useCallback(async (repName) => {
+    if (!repName) return;
+    setBreakdownType('rep');
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    try {
+      const res = await analyticsAPI.getRepBreakdown(repName);
+      setRepBreakdown(res.data);
+      setPharmacyBreakdown(null);
+      setDoctorBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || 'Failed to load breakdown';
+      setBreakdownError(message);
+      setRepBreakdown(null);
+      setPharmacyBreakdown(null);
+      setDoctorBreakdown(null);
+      setProductBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, []);
+
+  const handleProductSelect = useCallback(async (productName) => {
+    if (!productName) return;
+    setBreakdownType('product');
+    setBreakdownLoading(true);
+    setBreakdownError(null);
+    try {
+      const res = await analyticsAPI.getProductBreakdown(productName);
+      setProductBreakdown(res.data);
+      setPharmacyBreakdown(null);
+      setDoctorBreakdown(null);
+      setRepBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } catch (error) {
+      const message = error.response?.data?.detail || error.message || 'Failed to load breakdown';
+      setBreakdownError(message);
+      setProductBreakdown(null);
+      setPharmacyBreakdown(null);
+      setDoctorBreakdown(null);
+      setRepBreakdown(null);
+      setBreakdownDialogOpen(true);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, []);
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert severity="error" action={
+        <Button color="inherit" size="small" onClick={handleRefresh}>
+          Retry
+        </Button>
+      }>
+        {typeof error === 'string' ? error : JSON.stringify(error)}
+      </Alert>
+    );
+  }
+
+  return (
+    <Box>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4" gutterBottom>
+          Analytics
+        </Typography>
+        <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Date Range</InputLabel>
+            <Select
+              value={useCustomDateRange ? 'custom' : dateRange}
+              label="Date Range"
+              onChange={(e) => {
+                if (e.target.value === 'custom') {
+                  setUseCustomDateRange(true);
+                } else {
+                  setUseCustomDateRange(false);
+                  setDateRange(e.target.value);
+                }
+              }}
+            >
+              <MenuItem value="7">Last 7 days</MenuItem>
+              <MenuItem value="30">Last 30 days</MenuItem>
+              <MenuItem value="90">Last 90 days</MenuItem>
+              <MenuItem value="365">Last year</MenuItem>
+              <MenuItem value="custom">Custom Range</MenuItem>
+            </Select>
+          </FormControl>
+          {useCustomDateRange && (
+            <>
+              <TextField
+                label="Start Date"
+                type="date"
+                size="small"
+                value={startDate || ''}
+                onChange={(e) => setStartDate(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 150 }}
+              />
+              <TextField
+                label="End Date"
+                type="date"
+                size="small"
+                value={endDate || ''}
+                onChange={(e) => setEndDate(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 150 }}
+              />
+              <Button
+                variant="contained"
+                size="small"
+                onClick={refreshAllAnalytics}
+                disabled={!startDate || !endDate}
+              >
+                Apply
+              </Button>
+            </>
+          )}
+          <Button 
+            variant="outlined" 
+            color="secondary"
+            onClick={() => setComparisonDialogOpen(true)}
+            sx={{ ml: 1 }}
+          >
+            Compare Analytics
+          </Button>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleExportAll}
+            sx={{ ml: 1 }}
+          >
+            Export All Analytics
+          </Button>
+          <Button variant="outlined" onClick={handleRefresh}>
+            Refresh
+          </Button>
+        </Box>
+      </Box>
+
+      <Card>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={tabValue} onChange={handleTabChange}>
+            <Tab label="Revenue by Pharmacy" />
+            <Tab label="Revenue by Doctor" />
+            <Tab label="Revenue by Rep" />
+            <Tab label="Revenue by HQ" />
+            <Tab label="Revenue by Area" />
+            <Tab label="Revenue by Product" />
+            <Tab label="Data Distribution" />
+            <Tab label="Performance Analysis" />
+            <Tab label="Data Quality" />
+          </Tabs>
+        </Box>
+
+        <TabPanel value={tabValue} index={0}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by Pharmacy
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Top performing pharmacies by revenue
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <ResponsiveContainer width="100%" height={revenueByPharmacy?.length > 10 ? 600 : 500}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByPharmacy || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar
+                    dataKey="revenue"
+                    fill="#8884d8"
+                    onClick={(data) => handlePharmacySelect(data?.payload?.name || data?.name)}
+                  />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={[...(revenueByPharmacy || [])].sort((a,b)=>b.revenue-a.revenue).slice(0,20).concat((revenueByPharmacy||[]).length>20?[{name:'Others',revenue:[...(revenueByPharmacy||[])].sort((a,b)=>b.revenue-a.revenue).slice(20).reduce((s,i)=>s+i.revenue,0)}]:[])}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={(revenueByPharmacy?.length||0) > 20 ? 200 : (revenueByPharmacy?.length||0) > 10 ? 160 : 120}
+                    fill="#8884d8"
+                    dataKey="revenue"
+                    onClick={(data) => handlePharmacySelect(data?.name || data?.payload?.name)}
+                  >
+                    {((revenueByPharmacy || []).slice(0,20)).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                    {((revenueByPharmacy||[]).length>20) && (
+                      <Cell key={`cell-others`} fill={COLORS[COLORS.length-1]} />
+                    )}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={3}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by HQ
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Revenue by headquarters
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <ResponsiveContainer width="100%" height={revenueByHQ?.length > 10 ? 600 : 500}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByHQ || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="hq" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" fill="#82ca9d" />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={revenueByHQ || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ hq, percent }) => `${hq} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#82ca9d"
+                    dataKey="revenue"
+                  >
+                    {(revenueByHQ || []).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={4}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by Area
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Revenue by geographical area
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <ResponsiveContainer width="100%" height={revenueByArea?.length > 10 ? 600 : 500}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByArea || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="area" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" fill="#ffc658" />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={revenueByArea || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ area, percent }) => `${area} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#ffc658"
+                    dataKey="revenue"
+                  >
+                    {(revenueByArea || []).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={1}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by Doctor
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Doctor performance and revenue contribution
+              </Typography>
+              <Box display="flex" gap={2} alignItems="center">
+                <TextField
+                  size="small"
+                  label="Quantity Threshold"
+                  type="number"
+                  value={quantityThreshold}
+                  onChange={(e) => setQuantityThreshold(e.target.value)}
+                  placeholder="e.g., 100"
+                  sx={{ width: 150 }}
+                  helperText="Show doctors below this quantity"
+                />
+                <Button
+                  variant={showLowQuantity ? "contained" : "outlined"}
+                  size="small"
+                  onClick={() => setShowLowQuantity(!showLowQuantity)}
+                  disabled={!quantityThreshold || isNaN(Number(quantityThreshold))}
+                >
+                  {showLowQuantity ? "Show All" : "Show Low Quantity"}
+                </Button>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+              </Box>
+            </Box>
+            <ResponsiveContainer width="100%" height={revenueByDoctor?.length > 10 ? 600 : 500}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByDoctor || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="doctor_name" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" fill="#8884d8" />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={[...(revenueByDoctor || [])].sort((a,b)=>b.revenue-a.revenue).slice(0,20).concat((revenueByDoctor||[]).length>20?[{doctor_name:'Others',revenue:[...(revenueByDoctor||[])].sort((a,b)=>b.revenue-a.revenue).slice(20).reduce((s,i)=>s+i.revenue,0)}]:[])}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ doctor_name, percent }) => `${doctor_name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={(revenueByDoctor?.length||0) > 20 ? 200 : (revenueByDoctor?.length||0) > 10 ? 160 : 120}
+                    fill="#8884d8"
+                    dataKey="revenue"
+                  >
+                    {((revenueByDoctor || []).slice(0,20)).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                    {((revenueByDoctor||[]).length>20) && (
+                      <Cell key={`cell-others`} fill={COLORS[COLORS.length-1]} />
+                    )}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+            
+            {/* Low Quantity Doctors Section */}
+            {showLowQuantity && quantityThreshold && !isNaN(Number(quantityThreshold)) && (
+              <Box mt={4}>
+                <Typography variant="h6" gutterBottom color="warning.main">
+                  Doctors with Quantity Below {quantityThreshold}
+                </Typography>
+                <RevenueListView
+                  data={(revenueByDoctor || []).filter(doctor => (doctor.quantity || 0) < Number(quantityThreshold))}
+                  title=""
+                  nameKey="doctor_name"
+                  revenueKey="revenue"
+                  color="#FF8042"
+                  extraColumns={[
+                    { label: 'Product', key: 'product_name', value: (row) => row.product_name || '-' },
+                    { label: 'Quantity', key: 'quantity', align: 'right', value: (row) => Number(row.quantity || 0) },
+                    { label: 'Pharmacy', key: 'pharmacy_name', value: (row) => row.pharmacy_name || '-' },
+                  ]}
+                />
+              </Box>
+            )}
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={2}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by Rep
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Sales representative performance
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <ResponsiveContainer width="100%" height={400}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByRep || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="rep_name" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar dataKey="revenue" fill="#00C49F" />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={revenueByRep || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ rep_name, percent }) => `${rep_name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#00C49F"
+                    dataKey="revenue"
+                  >
+                    {(revenueByRep || []).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${value.toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={5}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Revenue by Product
+            </Typography>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="body2" color="text.secondary">
+                Revenue by product performance
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Chart Type</InputLabel>
+                <Select
+                  value={chartType}
+                  label="Chart Type"
+                  onChange={handleChartTypeChange}
+                >
+                  <MenuItem value="bar">Bar Chart</MenuItem>
+                  <MenuItem value="pie">Pie Chart</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <ResponsiveContainer width="100%" height={revenueByProduct?.length > 10 ? 600 : 500}>
+              {chartType === 'bar' ? (
+                <BarChart data={revenueByProduct || []} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="product_name" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                  <Bar 
+                    dataKey="revenue" 
+                    fill="#82ca9d"
+                    onClick={(data) => handleProductSelect(data?.payload?.product_name || data?.product_name)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </BarChart>
+              ) : (
+                <PieChart>
+                  <Pie
+                    data={revenueByProduct || []}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ product_name, percent }) => `${product_name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="revenue"
+                    onClick={(data) => handleProductSelect(data?.name || data?.payload?.product_name)}
+                  >
+                    {(revenueByProduct || []).map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']} />
+                </PieChart>
+              )}
+            </ResponsiveContainer>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={6}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Data Distribution
+            </Typography>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Revenue distribution and data insights from uploaded files
+            </Typography>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Revenue Range Distribution
+                    </Typography>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={[
+                        { range: "0-1000", count: revenueByPharmacy.filter(p => p.revenue <= 1000).length },
+                        { range: "1000-5000", count: revenueByPharmacy.filter(p => p.revenue > 1000 && p.revenue <= 5000).length },
+                        { range: "5000-10000", count: revenueByPharmacy.filter(p => p.revenue > 5000 && p.revenue <= 10000).length },
+                        { range: "10000+", count: revenueByPharmacy.filter(p => p.revenue > 10000).length }
+                      ]} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="range" />
+                        <YAxis />
+                        <Tooltip formatter={(value) => [value, 'Pharmacies']} />
+                        <Bar dataKey="count" fill="#8884d8" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Data Summary
+                    </Typography>
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Total Pharmacies:</strong> {revenueByPharmacy.length}
+                      </Typography>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Total Doctors:</strong> {revenueByDoctor.length}
+                      </Typography>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Total Reps:</strong> {revenueByRep.length}
+                      </Typography>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Total HQs:</strong> {revenueByHQ.length}
+                      </Typography>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Total Areas:</strong> {revenueByArea.length}
+                      </Typography>
+                      <Typography variant="body2" gutterBottom>
+                        <strong>Average Revenue per Pharmacy:</strong> ₹{revenueByPharmacy.length > 0 ? (revenueByPharmacy.reduce((sum, p) => sum + p.revenue, 0) / revenueByPharmacy.length).toLocaleString('en-IN', {maximumFractionDigits: 2}) : 0}
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={6}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Performance Analysis
+            </Typography>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Comprehensive performance metrics and insights
+            </Typography>
+            
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Top 5 Pharmacies
+                    </Typography>
+                    {revenueByPharmacy.slice(0, 5).map((pharmacy, index) => (
+                      <Box key={index} display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">{pharmacy.pharmacy_name}</Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          ₹{pharmacy.revenue.toLocaleString('en-IN')}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Top 5 Doctors
+                    </Typography>
+                    {revenueByDoctor.slice(0, 5).map((doctor, index) => (
+                      <Box key={index} display="flex" justifyContent="space-between" mb={1}>
+                        <Typography variant="body2">{doctor.doctor_name}</Typography>
+                        <Typography variant="body2" fontWeight="bold">
+                          ₹{doctor.revenue.toLocaleString('en-IN')}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={8}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Data Quality
+            </Typography>
+            {dqLoading ? (
+              <Box display="flex" justifyContent="center" py={4}>
+                <CircularProgress />
+              </Box>
+            ) : dqError ? (
+              <Alert severity="error">
+                {typeof dqError === 'string' ? dqError : JSON.stringify(dqError)}
+              </Alert>
+            ) : (
+              <>
+                <Grid container spacing={3} sx={{ mb: 2 }}>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">Total Rows</Typography>
+                        <Typography variant="h5">{dataQuality?.total_rows || 0}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">Valid Rows</Typography>
+                        <Typography variant="h5">{dataQuality?.valid_rows || 0}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">Error Rows</Typography>
+                        <Typography variant="h5">{dataQuality?.error_rows || 0}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">Valid %</Typography>
+                        <Typography variant="h5">{dataQuality?.valid_percentage || 0}%</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">NIL Count</Typography>
+                        <Typography variant="h5">{dataQuality?.nil_count || 0}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="body2" color="text.secondary">INVALID Count</Typography>
+                        <Typography variant="h5">{dataQuality?.invalid_count || 0}</Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+                <Box display="flex" gap={2}>
+                  <Button variant="outlined" onClick={() => analyticsAPI.exportDataQuality('csv').then(res => { const url = window.URL.createObjectURL(new Blob([res.data])); const link = document.createElement('a'); link.href = url; link.setAttribute('download', 'data_quality.csv'); document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url); })}>Export CSV</Button>
+                  <Button variant="contained" onClick={() => analyticsAPI.exportDataQuality('xlsx').then(res => { const url = window.URL.createObjectURL(new Blob([res.data])); const link = document.createElement('a'); link.href = url; link.setAttribute('download', 'data_quality.xlsx'); document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url); })}>Export Excel</Button>
+                </Box>
+                <Box mt={2}>
+                  <Alert severity="info">
+                    {dataQuality?.notes?.nil} {dataQuality?.notes?.invalid}
+                  </Alert>
+                </Box>
+              </>
+            )}
+          </Box>
+        </TabPanel>
+      </Card>
+
+      {/* Revenue Lists Section */}
+      <Box mt={4}>
+        <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
+          Revenue Data Lists
+        </Typography>
+        <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+          Detailed revenue breakdowns in table format for all categories. Click to expand each section.
+        </Typography>
+        
+        <Box sx={{ width: '100%' }}>
+          <Accordion defaultExpanded>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by Pharmacy</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <EnhancedSearchFilter
+                data={revenueByPharmacy || []}
+                onFilterChange={setFilteredPharmacyData}
+                searchFields={['name', 'pharmacy_name', 'pharmacy_id', 'product_name']}
+                filterFields={[]}
+                placeholder="Search pharmacies, products..."
+              />
+              <RevenueListView
+                data={filteredPharmacyData || revenueByPharmacy}
+                title=""
+                nameKey="name"
+                revenueKey="revenue"
+                color="#0088FE"
+                extraColumns={[
+                  { label: 'Linked Product', key: 'product_name', value: (row) => row.product_name || '-' },
+                  { label: 'Quantity', key: 'quantity', align: 'right', value: (row) => Number(row.quantity || 0) }
+                ]}
+              onRowClick={(row) => handlePharmacySelect(row?.name)}
+              />
+            </AccordionDetails>
+          </Accordion>
+          
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by Doctor</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <EnhancedSearchFilter
+                data={revenueByDoctor || []}
+                onFilterChange={setFilteredDoctorData}
+                searchFields={['doctor_name', 'doctor_id', 'product_name', 'pharmacy_name']}
+                filterFields={[]}
+                placeholder="Search doctors, products, pharmacies..."
+              />
+              <RevenueListView
+                data={filteredDoctorData || revenueByDoctor}
+                title=""
+                nameKey="doctor_name"
+                revenueKey="revenue"
+                color="#00C49F"
+                extraColumns={[
+                  { label: 'Product', key: 'product_name', value: (row) => row.product_name || '-' },
+                  { label: 'Quantity', key: 'quantity', align: 'right', value: (row) => Number(row.quantity || 0) },
+                  { label: 'Pharmacy', key: 'pharmacy_name', value: (row) => row.pharmacy_name || '-' },
+                ]}
+                onRowClick={(row) => handleDoctorSelect(row?.doctor_name)}
+              />
+            </AccordionDetails>
+          </Accordion>
+          
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by Representative</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <EnhancedSearchFilter
+                data={revenueByRep || []}
+                onFilterChange={setFilteredRepData}
+                searchFields={['rep_name', 'pharmacy_name', 'product_name', 'doctor_name']}
+                filterFields={[]}
+                placeholder="Search representatives, pharmacies, products..."
+              />
+              <RevenueListView
+                data={filteredRepData || revenueByRep}
+                title=""
+                nameKey="rep_name"
+                revenueKey="revenue"
+                color="#FFBB28"
+                extraColumns={[
+                  { label: 'Pharmacy', key: 'pharmacy_name', value: (row) => row.pharmacy_name || '-' },
+                  { label: 'Products', key: 'product_name', value: (row) => row.product_name || '-' },
+                  { label: 'Quantity', key: 'quantity', align: 'right', value: (row) => Number(row.quantity || 0) },
+                  { label: 'Doctor', key: 'doctor_name', value: (row) => row.doctor_name || '-' },
+                ]}
+                onRowClick={(row) => handleRepSelect(row?.rep_name)}
+              />
+            </AccordionDetails>
+          </Accordion>
+          
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by HQ</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <RevenueListView
+                data={revenueByHQ}
+                title=""
+                nameKey="hq"
+                revenueKey="revenue"
+                color="#FF8042"
+              />
+            </AccordionDetails>
+          </Accordion>
+          
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by Area</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <RevenueListView
+                data={revenueByArea}
+                title=""
+                nameKey="area"
+                revenueKey="revenue"
+                color="#8884D8"
+              />
+            </AccordionDetails>
+          </Accordion>
+          
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="h6">Revenue by Product</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <EnhancedSearchFilter
+                data={revenueByProduct || []}
+                onFilterChange={setFilteredProductData}
+                searchFields={['product_name', 'product_id']}
+                filterFields={[]}
+                placeholder="Search products..."
+              />
+              <RevenueListView
+                data={filteredProductData || revenueByProduct}
+                title=""
+                nameKey="product_name"
+                revenueKey="revenue"
+                color="#82ca9d"
+                onRowClick={(row) => handleProductSelect(row?.product_name)}
+              />
+            </AccordionDetails>
+          </Accordion>
+        </Box>
+      </Box>
+    
+    <Dialog
+      open={breakdownDialogOpen}
+      onClose={handleCloseBreakdown}
+      maxWidth="md"
+      fullWidth
+    >
+      <DialogTitle>
+        Sales Breakdown - {breakdownType === 'pharmacy' 
+          ? (pharmacyBreakdown?.pharmacy_name || 'Pharmacy')
+          : breakdownType === 'doctor'
+          ? (doctorBreakdown?.doctor_name || 'Doctor')
+          : breakdownType === 'rep'
+          ? (repBreakdown?.rep_name || 'Representative')
+          : (productBreakdown?.product_name || 'Product')}
+      </DialogTitle>
+      <DialogContent dividers>
+        {breakdownLoading ? (
+          <Box display="flex" justifyContent="center" py={4}>
+            <CircularProgress size={32} />
+          </Box>
+        ) : breakdownError ? (
+          <Alert severity="error">{breakdownError}</Alert>
+        ) : (breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown) ? (
+          <Box>
+            <Box display="flex" flexWrap="wrap" gap={2} mb={2}>
+              {breakdownType === 'pharmacy' ? (
+                <>
+                  <Chip
+                    label={`Pharmacy ID: ${pharmacyBreakdown.pharmacy_id || '-'}`}
+                    variant="outlined"
+                  />
+                </>
+              ) : breakdownType === 'doctor' ? (
+                <>
+                  <Chip
+                    label={`Doctor ID: ${doctorBreakdown.doctor_id || '-'}`}
+                    variant="outlined"
+                  />
+                </>
+              ) : breakdownType === 'product' ? (
+                <>
+                  <Chip
+                    label={`Product ID: ${productBreakdown.product_id || '-'}`}
+                    variant="outlined"
+                  />
+                  {productBreakdown.product_price && (
+                    <Chip
+                      label={`Price: ${formatCurrency(productBreakdown.product_price)}`}
+                      variant="outlined"
+                    />
+                  )}
+                </>
+              ) : null}
+              <Chip
+                label={`Total Revenue: ${formatCurrency((breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).total_revenue || 0)}`}
+                color="primary"
+                variant="outlined"
+              />
+              <Chip
+                label={`Total Quantity: ${(breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).total_quantity || 0}`}
+                variant="outlined"
+              />
+            </Box>
+            
+            <Grid container spacing={3}>
+              {breakdownType !== 'product' && (
+                <Grid item xs={12} md={6}>
+                  {renderBreakdownTable('Products', (breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : repBreakdown).products, 'Product')}
+                </Grid>
+              )}
+              {breakdownType === 'pharmacy' ? (
+                <Grid item xs={12} md={6}>
+                  {renderBreakdownTable('Doctors', pharmacyBreakdown.doctors, 'Doctor')}
+                </Grid>
+              ) : breakdownType === 'doctor' ? (
+                <Grid item xs={12} md={6}>
+                  {renderBreakdownTable('Pharmacies', doctorBreakdown.pharmacies, 'Pharmacy')}
+                </Grid>
+              ) : breakdownType === 'rep' ? (
+                <>
+                  <Grid item xs={12} md={6}>
+                    {renderBreakdownTable('Pharmacies', repBreakdown.pharmacies, 'Pharmacy')}
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    {renderBreakdownTable('Doctors', repBreakdown.doctors, 'Doctor')}
+                  </Grid>
+                </>
+              ) : (
+                <>
+                  <Grid item xs={12} md={6}>
+                    {renderBreakdownTable('Pharmacies', productBreakdown.pharmacies, 'Pharmacy')}
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    {renderBreakdownTable('Doctors', productBreakdown.doctors, 'Doctor')}
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    {renderBreakdownTable('Representatives', productBreakdown.representatives, 'Representative')}
+                  </Grid>
+                </>
+              )}
+              {breakdownType !== 'rep' && breakdownType !== 'product' && (
+                <Grid item xs={12} md={6}>
+                  {renderBreakdownTable('Representatives', (breakdownType === 'pharmacy' ? pharmacyBreakdown : doctorBreakdown).representatives, 'Representative')}
+                </Grid>
+              )}
+              <Grid item xs={12} md={6}>
+                {renderBreakdownTable(
+                  'Monthly Timeline',
+                  ((breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).timeline || []).map((item) => ({
+                    name: item.period,
+                    revenue: item.revenue,
+                    quantity: item.quantity,
+                  })),
+                  'Period'
+                )}
+              </Grid>
+            </Grid>
+            
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle1" gutterBottom>
+              Recent Invoices
+            </Typography>
+            {!((breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).recent_invoices) || (breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).recent_invoices.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No recent invoices available
+              </Typography>
+            ) : (
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 320 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      {breakdownType !== 'product' && <TableCell>Product</TableCell>}
+                      {breakdownType === 'pharmacy' ? (
+                        <>
+                          <TableCell>Doctor</TableCell>
+                          <TableCell>Rep</TableCell>
+                        </>
+                      ) : breakdownType === 'doctor' ? (
+                        <>
+                          <TableCell>Pharmacy</TableCell>
+                          <TableCell>Rep</TableCell>
+                        </>
+                      ) : breakdownType === 'rep' ? (
+                        <>
+                          <TableCell>Pharmacy</TableCell>
+                          <TableCell>Doctor</TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell>Pharmacy</TableCell>
+                          <TableCell>Doctor</TableCell>
+                          <TableCell>Rep</TableCell>
+                        </>
+                      )}
+                      <TableCell align="right">Quantity</TableCell>
+                      <TableCell align="right">Revenue</TableCell>
+                      <TableCell align="right">Date</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(breakdownType === 'pharmacy' ? pharmacyBreakdown : breakdownType === 'doctor' ? doctorBreakdown : breakdownType === 'rep' ? repBreakdown : productBreakdown).recent_invoices.map((inv, idx) => (
+                      <TableRow key={`invoice-${inv.invoice_id}-${idx}`}>
+                        {breakdownType !== 'product' && <TableCell>{inv.product || '-'}</TableCell>}
+                        {breakdownType === 'pharmacy' ? (
+                          <>
+                            <TableCell>{inv.doctor || '-'}</TableCell>
+                            <TableCell>{inv.rep || '-'}</TableCell>
+                          </>
+                        ) : breakdownType === 'doctor' ? (
+                          <>
+                            <TableCell>{inv.pharmacy || '-'}</TableCell>
+                            <TableCell>{inv.rep || '-'}</TableCell>
+                          </>
+                        ) : breakdownType === 'rep' ? (
+                          <>
+                            <TableCell>{inv.pharmacy || '-'}</TableCell>
+                            <TableCell>{inv.doctor || '-'}</TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell>{inv.pharmacy || '-'}</TableCell>
+                            <TableCell>{inv.doctor || '-'}</TableCell>
+                            <TableCell>{inv.rep || '-'}</TableCell>
+                          </>
+                        )}
+                        <TableCell align="right">{inv.quantity ?? 0}</TableCell>
+                        <TableCell align="right">{formatCurrency(inv.revenue || 0)}</TableCell>
+                        <TableCell align="right">{formatDate(inv.invoice_date)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </Box>
+        ) : (
+          <Typography>No breakdown data available.</Typography>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleCloseBreakdown}>Close</Button>
+      </DialogActions>
+    </Dialog>
+
+    {/* Comparison Dialog */}
+    <Dialog
+      open={comparisonDialogOpen}
+      onClose={() => {
+        setComparisonDialogOpen(false);
+        setComparisonData(null);
+        setComparisonError(null);
+      }}
+      maxWidth="lg"
+      fullWidth
+    >
+      <DialogTitle>Compare Analytics</DialogTitle>
+      <DialogContent dividers>
+        <Box>
+          <FormControl fullWidth sx={{ mb: 3 }}>
+            <InputLabel>Comparison Type</InputLabel>
+            <Select
+              value={comparisonType}
+              label="Comparison Type"
+              onChange={(e) => {
+                setComparisonType(e.target.value);
+                setComparisonData(null);
+                setComparisonError(null);
+              }}
+            >
+              <MenuItem value="period">Compare Two Time Periods</MenuItem>
+              <MenuItem value="pharmacy">Compare Two Pharmacies</MenuItem>
+              <MenuItem value="doctor">Compare Two Doctors</MenuItem>
+              <MenuItem value="product">Compare Two Products</MenuItem>
+              <MenuItem value="rep">Compare Two Representatives</MenuItem>
+            </Select>
+          </FormControl>
+
+          {comparisonType === 'period' ? (
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" gutterBottom>
+                  Period 1
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Start Date"
+                  type="date"
+                  value={period1Start}
+                  onChange={(e) => setPeriod1Start(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="End Date"
+                  type="date"
+                  value={period1End}
+                  onChange={(e) => setPeriod1End(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+                  Period 2
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Start Date"
+                  type="date"
+                  value={period2Start}
+                  onChange={(e) => setPeriod2Start(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="End Date"
+                  type="date"
+                  value={period2End}
+                  onChange={(e) => setPeriod2End(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+            </Grid>
+          ) : (
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <Autocomplete
+                  freeSolo
+                  options={
+                    comparisonType === 'pharmacy' ? (revenueByPharmacy || []).map(p => p.pharmacy_name || p.name || '').filter(Boolean) :
+                    comparisonType === 'doctor' ? (revenueByDoctor || []).map(d => d.doctor_name || d.name || '').filter(Boolean) :
+                    comparisonType === 'product' ? (revenueByProduct || []).map(p => p.product_name || p.name || '').filter(Boolean) :
+                    (revenueByRep || []).map(r => r.rep_name || r.name || '').filter(Boolean)
+                  }
+                  value={entity1Name}
+                  onChange={(e, newValue) => setEntity1Name(newValue || '')}
+                  onInputChange={(e, newInputValue) => setEntity1Name(newInputValue)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={`First ${comparisonType.charAt(0).toUpperCase() + comparisonType.slice(1)}`}
+                      variant="outlined"
+                    />
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Autocomplete
+                  freeSolo
+                  options={
+                    comparisonType === 'pharmacy' ? (revenueByPharmacy || []).map(p => p.pharmacy_name || p.name || '').filter(Boolean) :
+                    comparisonType === 'doctor' ? (revenueByDoctor || []).map(d => d.doctor_name || d.name || '').filter(Boolean) :
+                    comparisonType === 'product' ? (revenueByProduct || []).map(p => p.product_name || p.name || '').filter(Boolean) :
+                    (revenueByRep || []).map(r => r.rep_name || r.name || '').filter(Boolean)
+                  }
+                  value={entity2Name}
+                  onChange={(e, newValue) => setEntity2Name(newValue || '')}
+                  onInputChange={(e, newInputValue) => setEntity2Name(newInputValue)}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={`Second ${comparisonType.charAt(0).toUpperCase() + comparisonType.slice(1)}`}
+                      variant="outlined"
+                    />
+                  )}
+                />
+              </Grid>
+            </Grid>
+          )}
+
+          {comparisonError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {comparisonError}
+            </Alert>
+          )}
+
+          {comparisonLoading && (
+            <Box display="flex" justifyContent="center" py={4}>
+              <CircularProgress />
+            </Box>
+          )}
+
+          {comparisonData && !comparisonLoading && (
+            <Box sx={{ mt: 3 }}>
+              {comparisonType === 'period' ? (
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Typography variant="h6" gutterBottom>
+                      Comparison Results
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          Period 1: {comparisonData.period1.start} to {comparisonData.period1.end}
+                        </Typography>
+                        <Typography variant="h5" color="primary">
+                          {formatCurrency(comparisonData.period1.total_revenue)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          Period 2: {comparisonData.period2.start} to {comparisonData.period2.end}
+                        </Typography>
+                        <Typography variant="h5" color="primary">
+                          {formatCurrency(comparisonData.period2.total_revenue)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          Growth Rate
+                        </Typography>
+                        <Typography 
+                          variant="h4" 
+                          color={comparisonData.growth.total_revenue_growth >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {comparisonData.growth.total_revenue_growth >= 0 ? '+' : ''}
+                          {comparisonData.growth.total_revenue_growth.toFixed(2)}%
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              ) : (
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Typography variant="h6" gutterBottom>
+                      Comparison Results
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          {comparisonData.entity1.name}
+                        </Typography>
+                        <Typography variant="h5" color="primary">
+                          {formatCurrency(comparisonData.entity1.data.revenue || 0)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          {comparisonData.entity2.name}
+                        </Typography>
+                        <Typography variant="h5" color="primary">
+                          {formatCurrency(comparisonData.entity2.data.revenue || 0)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="subtitle1" gutterBottom>
+                          Difference
+                        </Typography>
+                        <Typography 
+                          variant="h4" 
+                          color={comparisonData.difference.revenue_diff >= 0 ? 'success.main' : 'error.main'}
+                        >
+                          {comparisonData.difference.revenue_diff >= 0 ? '+' : ''}
+                          {formatCurrency(comparisonData.difference.revenue_diff)}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              )}
+            </Box>
+          )}
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => {
+          setComparisonDialogOpen(false);
+          setComparisonData(null);
+          setComparisonError(null);
+        }}>
+          Close
+        </Button>
+        <Button 
+          variant="contained" 
+          onClick={handleCompare}
+          disabled={comparisonLoading}
+        >
+          Compare
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </Box>
+  );
+}
+
+export default Analytics;
