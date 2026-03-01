@@ -1133,8 +1133,19 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
 
 @app.post("/api/v1/upload/master-only")
 async def upload_master(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    logger.info(f"Upload master endpoint called by user: {current_user.username}")
+    
+    # Check if file was actually received
+    if not file:
+        logger.error("No file object received in upload_master")
+        raise HTTPException(status_code=400, detail="No file provided in request")
+    if not file.filename:
+        logger.error(f"File object received but no filename: {type(file)}")
+        raise HTTPException(status_code=400, detail="File has no filename")
     if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="File must be an Excel file")
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    
+    logger.info(f"Received file upload request: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
     
     try:
         # Clear existing master data before processing new file

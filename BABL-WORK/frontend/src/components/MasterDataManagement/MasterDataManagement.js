@@ -592,13 +592,22 @@ function MasterDataManagement() {
       setSuccess(null);
 
       try {
+        console.log('Preparing to upload file:', {
+          name: file.name,
+          size: file.size,
+          type: file.type
+        });
+        
         const formData = new FormData();
         formData.append('file', file);
+        
+        // Verify FormData has the file
+        console.log('FormData keys:', Array.from(formData.keys()));
+        console.log('FormData file entry:', formData.get('file'));
 
+        // Don't set Content-Type manually - axios will set it automatically with boundary
         const response = await api.post('/api/v1/upload/master-only', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+          timeout: 120000, // 2 minutes for large files
         });
 
         setSuccess(`Master file uploaded successfully! Processed ${response.data.rows_processed || 0} rows.`);

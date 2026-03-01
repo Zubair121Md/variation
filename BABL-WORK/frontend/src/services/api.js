@@ -64,19 +64,22 @@ export const authAPI = {
 // Upload API
 export const uploadAPI = {
   uploadInvoice: (formData) => api.post('/api/v1/upload/invoice-only', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    timeout: 120000, // 2 minutes for large files
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
   }),
   uploadMaster: (formData) => api.post('/api/v1/upload/master-only', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    timeout: 120000, // 2 minutes for large files
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
   }),
   uploadEnhanced: (formData) => api.post('/api/v1/upload/enhanced', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    timeout: 120000, // 2 minutes for large files
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
   }),
 };
 
