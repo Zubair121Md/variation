@@ -1063,34 +1063,41 @@ file_processor = FileProcessor()
 # Upload endpoints
 @app.post("/api/v1/upload/invoice-only")
 async def upload_invoice(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    logger.info(f"Upload invoice endpoint called by user: {current_user.username}")
-    
-    # Check if file was actually received
-    if not file:
-        logger.error("No file object received in upload_invoice")
-        raise HTTPException(status_code=400, detail="No file provided in request")
-    if not file.filename:
-        logger.error(f"File object received but no filename: {type(file)}")
-        raise HTTPException(status_code=400, detail="File has no filename")
-    if not file.filename.endswith(('.xlsx', '.xls')):
+    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
-    
-    logger.info(f"Received file upload request: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
     
     tmp_file_path = None
     try:
         logger.info(f"Upload invoice file: {file.filename} by user {current_user.username}")
         
-        # Clear existing invoice data for this user before processing new file
-        from app.database import get_db, Invoice
+        # Ensure user exists in database (create if needed for foreign key constraint)
+        from app.database import get_db, Invoice, User
         user_id = current_user.id if hasattr(current_user, 'id') else 1
         db = next(get_db())
         try:
+            # Check if user exists in database, create if not
+            db_user = db.query(User).filter(User.id == user_id).first()
+            if not db_user:
+                logger.warning(f"User {user_id} not found in database, creating...")
+                from app.auth import get_password_hash
+                db_user = User(
+                    id=user_id,
+                    username=current_user.username,
+                    email=current_user.email if hasattr(current_user, 'email') else f"user{user_id}@pharmacy.com",
+                    password_hash=get_password_hash("admin123"),  # Default password
+                    role=current_user.role if hasattr(current_user, 'role') else "user",
+                    area=None
+                )
+                db.add(db_user)
+                db.commit()
+                logger.info(f"Created user {user_id} in database")
+            
+            # Clear existing invoice data for this user before processing new file
             db.query(Invoice).filter(Invoice.user_id == user_id).delete()
             db.commit()
             logger.info(f"Cleared existing invoice data for user {user_id}")
         except Exception as e:
-            logger.warning(f"Error clearing existing invoice data: {str(e)}")
+            logger.warning(f"Error ensuring user exists or clearing invoice data: {str(e)}")
             db.rollback()
         finally:
             db.close()
@@ -1104,9 +1111,34 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
             tmp_file_path = tmp_file.name
             logger.info(f"Saved temporary file: {tmp_file_path}, size: {len(content)} bytes")
         
+        # Ensure user exists in database before processing (for foreign key constraint)
+        from app.database import get_db, User
+        user_id = current_user.id if hasattr(current_user, 'id') else 1
+        db = next(get_db())
+        try:
+            db_user = db.query(User).filter(User.id == user_id).first()
+            if not db_user:
+                logger.warning(f"User {user_id} not found in database, creating...")
+                from app.auth import get_password_hash
+                db_user = User(
+                    id=user_id,
+                    username=current_user.username,
+                    email=current_user.email if hasattr(current_user, 'email') else f"user{user_id}@pharmacy.com",
+                    password_hash=get_password_hash("admin123"),
+                    role=current_user.role if hasattr(current_user, 'role') else "user",
+                    area=None
+                )
+                db.add(db_user)
+                db.commit()
+                logger.info(f"Created user {user_id} ({current_user.username}) in database")
+        except Exception as e:
+            logger.error(f"Error ensuring user exists: {str(e)}")
+            db.rollback()
+        finally:
+            db.close()
+        
         # Process the invoice file
         logger.info(f"Processing invoice file: {tmp_file_path}")
-        user_id = current_user.id if hasattr(current_user, 'id') else 1
         result = file_processor.process_invoice_file(tmp_file_path, user_id=user_id)
         logger.info(f"Processing result: {result}")
         
@@ -1144,19 +1176,8 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
 
 @app.post("/api/v1/upload/master-only")
 async def upload_master(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    logger.info(f"Upload master endpoint called by user: {current_user.username}")
-    
-    # Check if file was actually received
-    if not file:
-        logger.error("No file object received in upload_master")
-        raise HTTPException(status_code=400, detail="No file provided in request")
-    if not file.filename:
-        logger.error(f"File object received but no filename: {type(file)}")
-        raise HTTPException(status_code=400, detail="File has no filename")
     if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
-    
-    logger.info(f"Received file upload request: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
+        raise HTTPException(status_code=400, detail="File must be an Excel file")
     
     try:
         # Clear existing master data before processing new file
@@ -1175,25 +1196,49 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
             tmp_file_path = tmp_file.name
         
         # Process the master file
-        result = file_processor.process_master_file(tmp_file_path)
+        logger.info(f"Processing master file: {tmp_file_path}")
+        try:
+            result = file_processor.process_master_file(tmp_file_path)
+        except Exception as proc_error:
+            logger.error(f"Error in process_master_file: {str(proc_error)}", exc_info=True)
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+            raise HTTPException(status_code=500, detail=f"Error processing master file: {str(proc_error)}")
         
         # Clean up temporary file
-        os.unlink(tmp_file_path)
+        if tmp_file_path and os.path.exists(tmp_file_path):
+            try:
+                os.unlink(tmp_file_path)
+            except Exception as cleanup_error:
+                logger.warning(f"Error cleaning up temp file: {str(cleanup_error)}")
         
-        if not result["success"]:
-            raise HTTPException(status_code=400, detail=result["error"])
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error processing file")
+            logger.error(f"Master file processing failed: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         # Return processing summary (DB already updated inside processor)
+        logger.info(f"Master file processed successfully: {result.get('processed_rows', 0)} rows")
         return {
             "message": "Master file processed successfully",
             "filename": file.filename,
-            "processed_rows": result.get("processed_rows", 0),
+            "rows_processed": result.get("processed_rows", 0),
+            "processed_rows": result.get("processed_rows", 0),  # Support both field names
             "status": "completed",
             "summary": result.get("summary", {}),
             "validation_errors": result.get("validation_errors", [])
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error in upload_master endpoint: {str(e)}", exc_info=True)
+        # Clean up temp file if it exists
+        if 'tmp_file_path' in locals() and tmp_file_path and os.path.exists(tmp_file_path):
+            try:
+                os.unlink(tmp_file_path)
+            except:
+                pass
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.post("/api/v1/upload/enhanced")
