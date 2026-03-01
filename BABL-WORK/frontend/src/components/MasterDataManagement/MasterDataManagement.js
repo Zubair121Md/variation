@@ -592,6 +592,19 @@ function MasterDataManagement() {
       setSuccess(null);
 
       try {
+        // Validate file before upload
+        if (!file) {
+          setError('No file selected');
+          setUploading(false);
+          return;
+        }
+        
+        if (!file.name || (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls'))) {
+          setError('File must be an Excel file (.xlsx or .xls)');
+          setUploading(false);
+          return;
+        }
+        
         const formData = new FormData();
         formData.append('file', file);
 
