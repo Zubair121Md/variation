@@ -1,0 +1,40 @@
+services:
+  # Backend API Service
+  - type: web
+    name: pharmacy-revenue-backend
+    env: python
+    buildCommand: cd BABL-WORK/backend && pip install -r requirements.txt
+    startCommand: cd BABL-WORK/backend && gunicorn app.main_complete:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        fromService:
+          type: web
+          name: pharmacy-revenue-backend
+          property: port
+    healthCheckPath: /health
+    autoDeploy: true
+
+  # Frontend Service
+  - type: web
+    name: pharmacy-revenue-frontend
+    env: node
+    buildCommand: cd BABL-WORK/frontend && npm install && npm run build
+    startCommand: cd BABL-WORK/frontend && npx serve -s build -l $PORT
+    envVars:
+      - key: REACT_APP_API_URL
+        fromService:
+          type: web
+          name: pharmacy-revenue-backend
+          property: host
+      - key: NODE_VERSION
+        value: 18.20.0
+      - key: PORT
+        fromService:
+          type: web
+          name: pharmacy-revenue-frontend
+          property: port
+    autoDeploy: true

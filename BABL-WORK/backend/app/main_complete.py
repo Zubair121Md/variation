@@ -46,14 +46,28 @@ async def _startup_db_prepare():
         pass
 
 # CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Get CORS origins from environment variable or use defaults
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    # Parse comma-separated origins from environment variable
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+else:
+    # Default origins for local development
+    cors_origins = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://frontend:80",
         "tauri://localhost"
-    ],
+    ]
+
+# Add Render frontend URL if REACT_APP_API_URL is set (for production)
+frontend_url = os.getenv("FRONTEND_URL", "")
+if frontend_url and frontend_url not in cors_origins:
+    cors_origins.append(frontend_url)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
