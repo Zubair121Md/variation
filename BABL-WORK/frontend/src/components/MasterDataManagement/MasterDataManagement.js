@@ -592,24 +592,14 @@ function MasterDataManagement() {
       setSuccess(null);
 
       try {
-        // Validate file before upload
-        if (!file) {
-          setError('No file selected');
-          setUploading(false);
-          return;
-        }
-        
-        if (!file.name || (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls'))) {
-          setError('File must be an Excel file (.xlsx or .xls)');
-          setUploading(false);
-          return;
-        }
-        
         const formData = new FormData();
         formData.append('file', file);
 
-        // Don't set Content-Type manually - axios will set it automatically with boundary
-        const response = await api.post('/api/v1/upload/master-only', formData);
+        const response = await api.post('/api/v1/upload/master-only', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        });
 
         setSuccess(`Master file uploaded successfully! Processed ${response.data.rows_processed || 0} rows.`);
         
@@ -621,22 +611,32 @@ function MasterDataManagement() {
       } catch (err) {
         // Handle FastAPI validation errors (422) - detail can be an array of objects
         let errorMessage = 'Failed to upload master file';
-        if (err.response?.data?.detail) {
-          const detail = err.response.data.detail;
-          if (Array.isArray(detail)) {
-            // FastAPI validation errors are arrays of objects
-            errorMessage = detail.map(e => `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`).join(', ');
-          } else if (typeof detail === 'string') {
-            errorMessage = detail;
-          } else if (typeof detail === 'object') {
-            // Try to extract a meaningful message
-            errorMessage = detail.msg || detail.message || JSON.stringify(detail);
+        if (err.response?.data) {
+          const data = err.response.data;
+          console.error('Upload error response:', data);
+          
+          if (data.detail) {
+            const detail = data.detail;
+            if (Array.isArray(detail)) {
+              // FastAPI validation errors are arrays of objects
+              errorMessage = detail.map(e => {
+                if (typeof e === 'string') return e;
+                return `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`;
+              }).join(', ');
+            } else if (typeof detail === 'string') {
+              errorMessage = detail;
+            } else if (typeof detail === 'object') {
+              errorMessage = detail.msg || detail.message || JSON.stringify(detail);
+            }
+          } else if (data.errors) {
+            errorMessage = Array.isArray(data.errors) ? data.errors.join(', ') : JSON.stringify(data.errors);
           }
         } else if (err.message) {
           errorMessage = err.message;
         }
         setError(errorMessage);
         console.error('Error uploading master file:', err);
+        console.error('Error response data:', err.response?.data);
       } finally {
         setUploading(false);
       }
@@ -782,7 +782,7 @@ function MasterDataManagement() {
 
           {error && (
             <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
-              {typeof error === 'string' ? error : JSON.stringify(error)}
+              {error}
             </Alert>
           )}
 
@@ -1171,7 +1171,7 @@ function MasterDataManagement() {
         <DialogContent>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {typeof error === 'string' ? error : JSON.stringify(error)}
+              {error}
             </Alert>
           )}
           {loadingUniqueValues && (

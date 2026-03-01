@@ -26,23 +26,6 @@ api.interceptors.request.use(
     } else {
       console.warn('No token found in localStorage for request:', config.url);
     }
-    
-    // For FormData, ensure proper handling
-    if (config.data instanceof FormData) {
-      // Remove Content-Type if manually set - let axios set it with boundary
-      if (config.headers['Content-Type']) {
-        delete config.headers['Content-Type'];
-      }
-      // Log for debugging file uploads
-      if (config.url?.includes('/upload/')) {
-        console.log('File upload request:', {
-          url: config.url,
-          hasToken: !!token,
-          formDataKeys: Array.from(config.data.keys())
-        });
-      }
-    }
-    
     return config;
   },
   (error) => {
@@ -81,14 +64,19 @@ export const authAPI = {
 // Upload API
 export const uploadAPI = {
   uploadInvoice: (formData) => api.post('/api/v1/upload/invoice-only', formData, {
-    // Don't set Content-Type - let axios set it automatically with boundary for FormData
-    // This ensures Authorization header is also sent properly
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
   }),
   uploadMaster: (formData) => api.post('/api/v1/upload/master-only', formData, {
-    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
   }),
   uploadEnhanced: (formData) => api.post('/api/v1/upload/enhanced', formData, {
-    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
   }),
 };
 

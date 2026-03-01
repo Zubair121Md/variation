@@ -1,8 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Body, Query
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from collections import defaultdict
@@ -87,25 +85,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Exception handler for validation errors (422)
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc: RequestValidationError):
-    """Handle FastAPI validation errors and return user-friendly messages"""
-    errors = []
-    for error in exc.errors():
-        field = ".".join(str(loc) for loc in error.get("loc", []))
-        msg = error.get("msg", "Validation error")
-        errors.append(f"{field}: {msg}")
-    
-    logger.error(f"Validation error on {request.url.path}: {errors}")
-    return JSONResponse(
-        status_code=422,
-        content={
-            "detail": errors[0] if len(errors) == 1 else errors,
-            "errors": errors
-        }
-    )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -1154,15 +1133,9 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
 
 @app.post("/api/v1/upload/master-only")
 async def upload_master(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    # Check if file was actually received
-    if not file:
-        raise HTTPException(status_code=400, detail="No file provided in request")
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="File has no filename")
     if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+        raise HTTPException(status_code=400, detail="File must be an Excel file")
     
-    tmp_file_path = None
     try:
         # Clear existing master data before processing new file
         from app.database import get_db, MasterMapping
@@ -1170,56 +1143,35 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
         try:
             db.query(MasterMapping).delete()
             db.commit()
-            logger.info("Cleared existing master data")
-        except Exception as e:
-            logger.warning(f"Error clearing existing master data: {str(e)}")
-            db.rollback()
         finally:
             db.close()
         
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
             content = await file.read()
-            if not content:
-                raise HTTPException(status_code=400, detail="Uploaded file is empty")
             tmp_file.write(content)
             tmp_file_path = tmp_file.name
-            logger.info(f"Saved temporary file: {tmp_file_path}, size: {len(content)} bytes")
         
         # Process the master file
         result = file_processor.process_master_file(tmp_file_path)
         
         # Clean up temporary file
-        if tmp_file_path and os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
+        os.unlink(tmp_file_path)
         
-        if not result.get("success", False):
-            error_msg = result.get("error", "Unknown error processing file")
-            logger.error(f"File processing failed: {error_msg}")
-            raise HTTPException(status_code=400, detail=error_msg)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
         
         # Return processing summary (DB already updated inside processor)
-        logger.info(f"Master file processed successfully: {result.get('processed_rows', 0)} rows")
         return {
             "message": "Master file processed successfully",
             "filename": file.filename,
             "processed_rows": result.get("processed_rows", 0),
-            "rows_processed": result.get("processed_rows", 0),  # Add alias for frontend
             "status": "completed",
             "summary": result.get("summary", {}),
             "validation_errors": result.get("validation_errors", [])
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error processing master file: {str(e)}", exc_info=True)
-        # Clean up temporary file if it exists
-        if tmp_file_path and os.path.exists(tmp_file_path):
-            try:
-                os.unlink(tmp_file_path)
-            except:
-                pass
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @app.post("/api/v1/upload/enhanced")
