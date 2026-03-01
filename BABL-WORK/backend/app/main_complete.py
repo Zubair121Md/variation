@@ -114,6 +114,10 @@ class IdGenerationResponse(BaseModel):
     timestamp: str
     metadata: Optional[Dict] = None  # For product: price and matched_original
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
 class DashboardData(BaseModel):
     total_revenue: float
     total_pharmacies: int
@@ -342,10 +346,10 @@ async def health_check():
 
 # Authentication endpoints
 @app.post("/api/v1/auth/login")
-async def login(login_data: dict):
+async def login(login_data: LoginRequest):
     try:
-        username = login_data.get("username", "").strip()
-        password = login_data.get("password", "").strip()
+        username = login_data.username.strip()
+        password = login_data.password.strip()
         
         logger.info(f"Login attempt: username={username}")
         
