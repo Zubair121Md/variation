@@ -1153,10 +1153,16 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
             tmp_file_path = tmp_file.name
         
         # Process the master file
+        logger.info(f"Starting master file processing: {tmp_file_path}")
         result = file_processor.process_master_file(tmp_file_path)
+        logger.info(f"Master file processing result: success={result.get('success')}, processed_rows={result.get('processed_rows', 0)}, errors={len(result.get('validation_errors', []))}")
         
         # Clean up temporary file
-        os.unlink(tmp_file_path)
+        if tmp_file_path and os.path.exists(tmp_file_path):
+            try:
+                os.unlink(tmp_file_path)
+            except Exception as cleanup_error:
+                logger.warning(f"Error cleaning up temp file: {cleanup_error}")
         
         if not result["success"]:
             error_detail = result.get("error", "Unknown error")

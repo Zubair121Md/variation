@@ -350,6 +350,7 @@ class FileProcessor:
                 validation_errors = []
                 
                 for index, row in df.iterrows():
+                    row_errors = []  # Track errors for THIS row only
                     try:
                         processed_row = {
                             "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
@@ -370,47 +371,61 @@ class FileProcessor:
                             "field": "Data conversion",
                             "error": f"Error processing row data: {str(row_error)}"
                         })
+                        logger.warning(f"Row {index + 2}: Data conversion error: {str(row_error)}")
                         continue
                     
-                    # Validate required fields
+                    # Validate required fields for THIS row
                     if not processed_row["pharmacy_name"]:
-                        validation_errors.append({
+                        row_errors.append({
                             "row": index + 2,
                             "field": "Pharmacy_Names",
                             "error": "Pharmacy name is required"
                         })
                     
                     if not processed_row["pharmacy_id"]:
-                        validation_errors.append({
+                        row_errors.append({
                             "row": index + 2,
                             "field": "Pharmacy_ID",
                             "error": "Pharmacy ID is required"
                         })
                     
                     if processed_row["product_price"] <= 0:
-                        validation_errors.append({
+                        row_errors.append({
                             "row": index + 2,
                             "field": "Product_Price",
                             "error": "Product price must be greater than 0"
                         })
                     
-                    # Store in database if valid
-                    if not validation_errors or all(error["row"] != index + 2 for error in validation_errors):
-                        master_record = MasterMapping(
-                            pharmacy_id=processed_row["pharmacy_id"].replace('-', '_'),
-                            pharmacy_names=processed_row["pharmacy_name"],
-                            product_names=processed_row["product_name"],
-                            product_id=processed_row["product_id"] if processed_row["product_id"] else None,
-                            product_price=processed_row["product_price"],
-                            doctor_names=processed_row["doctor_name"],
-                            doctor_id=processed_row["doctor_id"],
-                            rep_names=processed_row["rep_name"],
-                            hq=processed_row["hq"],
-                            area=processed_row["area"]
-                        )
-                        db.add(master_record)
+                    # Add row errors to global validation_errors list
+                    validation_errors.extend(row_errors)
                     
-                    processed_data.append(processed_row)
+                    # Store in database ONLY if THIS row has no errors
+                    if not row_errors:
+                        try:
+                            master_record = MasterMapping(
+                                pharmacy_id=processed_row["pharmacy_id"].replace('-', '_'),
+                                pharmacy_names=processed_row["pharmacy_name"],
+                                product_names=processed_row["product_name"],
+                                product_id=processed_row["product_id"] if processed_row["product_id"] else None,
+                                product_price=processed_row["product_price"],
+                                doctor_names=processed_row["doctor_name"],
+                                doctor_id=processed_row["doctor_id"],
+                                rep_names=processed_row["rep_name"],
+                                hq=processed_row["hq"],
+                                area=processed_row["area"]
+                            )
+                            db.add(master_record)
+                            processed_data.append(processed_row)
+                            logger.debug(f"Row {index + 2}: Added to database - Pharmacy: {processed_row['pharmacy_name']}, Product: {processed_row['product_name']}")
+                        except Exception as db_error:
+                            logger.error(f"Row {index + 2}: Database error: {str(db_error)}")
+                            validation_errors.append({
+                                "row": index + 2,
+                                "field": "Database",
+                                "error": f"Failed to save to database: {str(db_error)}"
+                            })
+                    else:
+                        logger.warning(f"Row {index + 2}: Skipped due to validation errors: {[e['error'] for e in row_errors]}")
                 
                 # Commit to database
                 db.commit()
@@ -423,17 +438,23 @@ class FileProcessor:
             finally:
                 db.close()
             
+            # Count actually stored rows (only valid ones)
+            valid_rows_count = len(processed_data)
+            error_rows_count = len(validation_errors)
+            
+            logger.info(f"Master file processing complete: {valid_rows_count} valid rows stored, {error_rows_count} rows with errors")
+            
             return {
                 "success": True,
-                "processed_rows": len(processed_data),
+                "processed_rows": valid_rows_count,  # Only count rows actually stored in DB
                 "data": processed_data,
                 "validation_errors": validation_errors,
                 "summary": {
                     "total_rows": len(df),
-                    "valid_rows": len(processed_data) - len(validation_errors),
-                    "error_rows": len(validation_errors),
-                    "unique_pharmacies": len(set(d["pharmacy_id"] for d in processed_data if d["pharmacy_id"])),
-                    "unique_products": len(set(d["product_id"] for d in processed_data if d["product_id"]))
+                    "valid_rows": valid_rows_count,
+                    "error_rows": error_rows_count,
+                    "unique_pharmacies": len(set(d["pharmacy_id"] for d in processed_data if d.get("pharmacy_id"))),
+                    "unique_products": len(set(d["product_id"] for d in processed_data if d.get("product_id") and d["product_id"]))
                 }
             }
             
