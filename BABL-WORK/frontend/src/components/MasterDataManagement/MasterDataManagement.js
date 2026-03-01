@@ -606,7 +606,23 @@ function MasterDataManagement() {
           setSearchQuery(''); // Clear search after upload
         }, 1000);
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to upload master file');
+        // Handle FastAPI validation errors (422) - detail can be an array of objects
+        let errorMessage = 'Failed to upload master file';
+        if (err.response?.data?.detail) {
+          const detail = err.response.data.detail;
+          if (Array.isArray(detail)) {
+            // FastAPI validation errors are arrays of objects
+            errorMessage = detail.map(e => `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`).join(', ');
+          } else if (typeof detail === 'string') {
+            errorMessage = detail;
+          } else if (typeof detail === 'object') {
+            // Try to extract a meaningful message
+            errorMessage = detail.msg || detail.message || JSON.stringify(detail);
+          }
+        } else if (err.message) {
+          errorMessage = err.message;
+        }
+        setError(errorMessage);
         console.error('Error uploading master file:', err);
       } finally {
         setUploading(false);
@@ -753,7 +769,7 @@ function MasterDataManagement() {
 
           {error && (
             <Alert severity="error" sx={{ mt: 2 }} onClose={() => setError(null)}>
-              {error}
+              {typeof error === 'string' ? error : JSON.stringify(error)}
             </Alert>
           )}
 
@@ -1142,7 +1158,7 @@ function MasterDataManagement() {
         <DialogContent>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-              {error}
+              {typeof error === 'string' ? error : JSON.stringify(error)}
             </Alert>
           )}
           {loadingUniqueValues && (
