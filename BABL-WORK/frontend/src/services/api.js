@@ -28,8 +28,17 @@ api.interceptors.request.use(
     }
     
     // For FormData, remove Content-Type header if manually set - let axios set it with boundary
-    if (config.data instanceof FormData && config.headers['Content-Type']) {
-      delete config.headers['Content-Type'];
+    // FastAPI in production strictly validates multipart/form-data and requires the boundary parameter
+    // Axios automatically adds the boundary when Content-Type is not manually set
+    if (config.data instanceof FormData || (config.data && config.data.constructor && config.data.constructor.name === 'FormData')) {
+      // Remove any manually set Content-Type - axios will set it with boundary automatically
+      if (config.headers['Content-Type']) {
+        delete config.headers['Content-Type'];
+      }
+      // Also check headers object directly
+      if (config.headers && config.headers['content-type']) {
+        delete config.headers['content-type'];
+      }
     }
     
     return config;
@@ -72,22 +81,12 @@ export const uploadAPI = {
   uploadInvoice: (formData) => api.post('/api/v1/upload/invoice-only', formData, {
     // Don't set Content-Type - let axios set it automatically with boundary for FormData
     // This ensures Authorization header is also sent properly
-    // Production FastAPI strictly validates multipart/form-data and requires the boundary parameter
-    timeout: 120000, // 2 minutes for large files
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
   }),
   uploadMaster: (formData) => api.post('/api/v1/upload/master-only', formData, {
     // Don't set Content-Type - let axios set it automatically with boundary for FormData
-    timeout: 120000, // 2 minutes for large files
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
   }),
   uploadEnhanced: (formData) => api.post('/api/v1/upload/enhanced', formData, {
     // Don't set Content-Type - let axios set it automatically with boundary for FormData
-    timeout: 120000, // 2 minutes for large files
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
   }),
 };
 
