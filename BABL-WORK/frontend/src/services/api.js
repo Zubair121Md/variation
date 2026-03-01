@@ -64,19 +64,14 @@ export const authAPI = {
 // Upload API
 export const uploadAPI = {
   uploadInvoice: (formData) => api.post('/api/v1/upload/invoice-only', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    // This ensures Authorization header is also sent properly
   }),
   uploadMaster: (formData) => api.post('/api/v1/upload/master-only', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
   }),
   uploadEnhanced: (formData) => api.post('/api/v1/upload/enhanced', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    // Don't set Content-Type - let axios set it automatically with boundary for FormData
   }),
 };
 

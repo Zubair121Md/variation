@@ -240,6 +240,13 @@ def normalize_product_name(product_name: str) -> str:
     Bulletproof product name normalization with misspelling tolerance.
     Handles variations, typos, and ensures all characters are read properly.
     """
+    # #region agent log
+    import json
+    try:
+        with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"tasks_enhanced.py:238","message":"normalize_product_name called","data":{"input":str(product_name)[:50],"function":"tasks_enhanced.normalize_product_name"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"B"})+'\n')
+    except: pass
+    # #endregion
     if not product_name or pd.isna(product_name):
         return ""
     
@@ -286,14 +293,17 @@ def normalize_product_name(product_name: str) -> str:
     # Remove pack sizes like 10S, 15S, 30S (tablets/capsules count)
     normalized = re.sub(r'\s*\d+\s*S\b', ' ', normalized)
     
-    # Step 5: Remove volume/quantity suffixes at the end
-    # Handle: 100ML, 10ML, 60ML, 200ML, 100 ML, etc.
-    normalized = re.sub(r'\s*\d+\s*(ML|MG|GM|G|KG|L)\s*$', '', normalized, flags=re.IGNORECASE)
-    
-    # Step 6: Normalize special characters and spacing
+    # Step 5: Normalize special characters and spacing (do this before removing volumes)
     # Replace dashes, dots, underscores with spaces
     normalized = re.sub(r'[-._]', ' ', normalized)
     # Remove multiple consecutive spaces
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    # Step 6: Remove volume/quantity suffixes ANYWHERE in the string (not just at end)
+    # Handle: 100ML, 10ML, 60ML, 200ML, 100 ML, 100M, etc.
+    # This must happen AFTER normalizing special chars but BEFORE gluing numbers
+    normalized = re.sub(r'\s*\d+\s*(ML|MG|GM|G|KG|L|M)\s*', ' ', normalized, flags=re.IGNORECASE)
+    # Clean up any extra spaces created
     normalized = re.sub(r'\s+', ' ', normalized).strip()
     
     # Step 7: Handle common product name variations
@@ -339,6 +349,12 @@ def normalize_product_name(product_name: str) -> str:
     # Step 11: Remove all spaces for final matching
     normalized = normalized.replace(' ', '')
     
+    # #region agent log
+    try:
+        with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"tasks_enhanced.py:349","message":"normalize_product_name result","data":{"input":str(product_name)[:50],"output":normalized[:50],"function":"tasks_enhanced.normalize_product_name"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"B"})+'\n')
+    except: pass
+    # #endregion
     return normalized
 
 def find_best_matching_pharmacy(pharmacy_name: str, generated_id: str, master_data: List[MasterMapping], db: Session) -> Optional[Tuple[str, MasterMapping]]:
@@ -356,6 +372,13 @@ def find_best_matching_pharmacy(pharmacy_name: str, generated_id: str, master_da
     Returns:
         Tuple of (matched_pharmacy_id, sample_master_record) or None
     """
+    # #region agent log
+    import json
+    try:
+        with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"location":"tasks_enhanced.py:344","message":"find_best_matching_pharmacy called","data":{"pharmacy_name":pharmacy_name[:50],"generated_id":generated_id,"master_count":len(master_data),"function":"tasks_enhanced.find_best_matching_pharmacy"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"D"})+'\n')
+    except: pass
+    # #endregion
     try:
         from fuzzywuzzy import fuzz, process
         
@@ -406,12 +429,24 @@ def find_best_matching_pharmacy(pharmacy_name: str, generated_id: str, master_da
         # If no ID-similar candidates, don't match (prevents wrong matches)
         if not id_similar_candidates:
             logger.debug(f"No ID-similar pharmacies found for '{pharmacy_name}' (generated_id: {generated_id})")
+            # #region agent log
+            try:
+                with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"tasks_enhanced.py:427","message":"find_best_matching_pharmacy no match","data":{"pharmacy_name":pharmacy_name[:50],"generated_id":generated_id,"reason":"no_id_similar_candidates","function":"tasks_enhanced.find_best_matching_pharmacy"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"D"})+'\n')
+            except: pass
+            # #endregion
             return None
         
         # Strategy 1: Exact normalized match (only in ID-similar candidates)
         for pharmacy_id, (name, normalized, norm_id, facility, record) in id_similar_candidates.items():
             if normalized == normalized_input:
                 logger.info(f"Exact pharmacy name match: '{pharmacy_name}' -> '{name}' (ID: {pharmacy_id}, id_similarity: {fuzz.ratio(generated_facility, facility)})")
+                # #region agent log
+                try:
+                    with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                        f.write(json.dumps({"location":"tasks_enhanced.py:435","message":"find_best_matching_pharmacy matched","data":{"pharmacy_name":pharmacy_name[:50],"matched_id":pharmacy_id,"matched_name":name[:50],"strategy":"exact_normalized","function":"tasks_enhanced.find_best_matching_pharmacy"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"D"})+'\n')
+                except: pass
+                # #endregion
                 return (pharmacy_id, record)
         
         # Strategy 2: Fuzzy match on normalized names (HIGH threshold - 90+)
@@ -470,6 +505,7 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
     Merge invoice data with master data using STRICT Pharmacy + Product matching
     Now with fuzzy product name matching via product_id_generator
     Handles multiple master records with same pharmacy+product combination
+    OPTIMIZED: Uses caching for normalization and product ID generation for better performance
     
     Args:
         df: Processed invoice DataFrame
@@ -485,9 +521,30 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
         matched_count = 0
         unmatched_count = 0
         
+        # PERFORMANCE OPTIMIZATION: Cache for normalized product names
+        normalization_cache = {}
+        
+        def cached_normalize_product_name(product_name: str) -> str:
+            """Cached version of normalize_product_name for O(1) lookups"""
+            if product_name not in normalization_cache:
+                normalization_cache[product_name] = normalize_product_name(product_name)
+            return normalization_cache[product_name]
+        
         # Build product reference mapping for fuzzy matching
         product_ref_mapping = build_product_reference_mapping(db)
         use_product_matching = len(product_ref_mapping) > 0
+        
+        # PERFORMANCE OPTIMIZATION: Cache for product ID generation
+        product_id_cache = {}
+        
+        def cached_generate_product_id(product_name: str) -> tuple:
+            """Cached version of generate_product_id for O(1) lookups"""
+            if product_name not in product_id_cache:
+                try:
+                    product_id_cache[product_name] = generate_product_id(product_name, db, product_ref_mapping)
+                except Exception:
+                    product_id_cache[product_name] = (None, None, None)
+            return product_id_cache[product_name]
         
         if use_product_matching:
             logger.info(f"Product reference table loaded with {len(product_ref_mapping)} core products for fuzzy matching")
@@ -499,23 +556,40 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
         master_lookup = {}  # Key: lookup_key, Value: list of master records
         master_record_map = {record.id: record for record in master_data}  # For quick lookups by ID
         
+        # PERFORMANCE OPTIMIZATION: Pre-normalize all pharmacy IDs once
+        pharmacy_id_normalization_cache = {}
+        
         # Create multiple lookups for better matching
         # 1. By pharmacy_id + normalized product name (exact)
         # 2. By pharmacy_id + product_id (from reference table)
         for record in master_data:
             # Exact match lookup
-            normalized_product = normalize_product_name(record.product_names)
-            key_exact = f"{record.pharmacy_id}|EXACT|{normalized_product}"
+            # CRITICAL: Normalize master pharmacy_id to ensure consistent matching
+            # Master data may have dashes or underscores, normalize to underscores
+            # PERFORMANCE: Use cached normalization
+            if record.pharmacy_id not in pharmacy_id_normalization_cache:
+                pharmacy_id_normalization_cache[record.pharmacy_id] = str(record.pharmacy_id).replace('-', '_')
+            normalized_master_pharmacy_id = pharmacy_id_normalization_cache[record.pharmacy_id]
+            normalized_product = cached_normalize_product_name(record.product_names)
+            key_exact = f"{normalized_master_pharmacy_id}|EXACT|{normalized_product}"
+            # #region agent log
+            try:
+                with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"tasks_enhanced.py:541","message":"Creating master lookup key","data":{"original_pharmacy_id":record.pharmacy_id,"normalized_pharmacy_id":normalized_master_pharmacy_id,"original_product":record.product_names[:50],"normalized_product":normalized_product[:50],"lookup_key":key_exact[:100],"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"E"})+'\n')
+            except: pass
+            # #endregion
             if key_exact not in master_lookup:
                 master_lookup[key_exact] = []
             master_lookup[key_exact].append(record)
             
             # If we have product reference, try to match master product to get product_id
+            # PERFORMANCE: Use cached product ID generation
             if use_product_matching:
                 try:
-                    product_id, _, matched_original = generate_product_id(record.product_names, db, product_ref_mapping)
+                    product_id, _, matched_original = cached_generate_product_id(record.product_names)
                     if product_id:
-                        key_fuzzy = f"{record.pharmacy_id}|PID|{product_id}"
+                        # Use normalized pharmacy_id for consistency
+                        key_fuzzy = f"{normalized_master_pharmacy_id}|PID|{product_id}"
                         if key_fuzzy not in master_lookup:
                             master_lookup[key_fuzzy] = []
                         master_lookup[key_fuzzy].append(record)
@@ -534,6 +608,12 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
             
             # Normalize ID for matching (replace - with _)
             normalized_id = generated_id.replace('-', '_')
+            # #region agent log
+            try:
+                with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"tasks_enhanced.py:568","message":"ID normalization","data":{"original_id":generated_id,"normalized_id":normalized_id,"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"E"})+'\n')
+            except: pass
+            # #endregion
             
             # Get pharmacy name from the row (try different column names)
             pharmacy_name = row.get('pharmacy_name', row.get('facility_name', row.get('original_pharmacy_name', 'Unknown')))
@@ -546,8 +626,15 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
             matched_pharmacy_id = normalized_id  # Default to generated ID
             
             # Strategy 1: Exact normalized product name match with exact pharmacy_id
-            normalized_product = normalize_product_name(row['product'])
+            # PERFORMANCE: Use cached normalization
+            normalized_product = cached_normalize_product_name(row['product'])
             lookup_key_exact = f"{normalized_id}|EXACT|{normalized_product}"
+            # #region agent log
+            try:
+                with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"location":"tasks_enhanced.py:582","message":"Looking up invoice product","data":{"pharmacy_id":normalized_id,"original_product":str(row['product'])[:50],"normalized_product":normalized_product[:50],"lookup_key":lookup_key_exact[:100],"found":lookup_key_exact in master_lookup,"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"B"})+'\n')
+            except: pass
+            # #endregion
             master_records = master_lookup.get(lookup_key_exact, [])
             if master_records:
                 match_method = "exact"
@@ -557,11 +644,21 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                 fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data, db)
                 if fuzzy_pharmacy_match:
                     matched_pharmacy_id, sample_record = fuzzy_pharmacy_match
+                    # CRITICAL: Normalize the matched pharmacy_id to ensure consistent lookup
+                    # The matched_pharmacy_id from master data may have dashes, normalize to underscores
+                    normalized_matched_pharmacy_id = str(matched_pharmacy_id).replace('-', '_')
                     # Try matching with the fuzzy-matched pharmacy_id
-                    lookup_key_exact = f"{matched_pharmacy_id}|EXACT|{normalized_product}"
+                    lookup_key_exact = f"{normalized_matched_pharmacy_id}|EXACT|{normalized_product}"
+                    # #region agent log
+                    try:
+                        with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
+                            f.write(json.dumps({"location":"tasks_enhanced.py:616","message":"Looking up with fuzzy-matched pharmacy","data":{"original_pharmacy_id":normalized_id,"matched_pharmacy_id":matched_pharmacy_id,"normalized_matched_pharmacy_id":normalized_matched_pharmacy_id,"normalized_product":normalized_product[:50],"lookup_key":lookup_key_exact[:100],"found":lookup_key_exact in master_lookup,"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"E"})+'\n')
+                    except: pass
+                    # #endregion
                     master_records = master_lookup.get(lookup_key_exact, [])
                     if master_records:
                         match_method = "exact_pharmacy_fuzzy"
+                        matched_pharmacy_id = normalized_matched_pharmacy_id  # Update for invoice creation
                         logger.info(f"Matched pharmacy via fuzzy name: '{pharmacy_name}' (generated: {normalized_id}) -> '{sample_record.pharmacy_names}' (matched: {matched_pharmacy_id})")
                 
                 # NEW: Also try matching with the original generated_id (for variant mappings)
@@ -574,15 +671,20 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                         logger.info(f"Matched via variant mapping: '{pharmacy_name}' (generated: {normalized_id}) + '{row['product']}'")
             
             # Strategy 3: Fuzzy match via product reference table (with matched pharmacy_id)
+            # PERFORMANCE: Use cached product ID generation
             if not master_records and use_product_matching:
                 try:
-                    product_id, product_price, matched_original = generate_product_id(row['product'], db, product_ref_mapping)
+                    product_id, product_price, matched_original = cached_generate_product_id(row['product'])
                     if product_id:
+                        # Ensure matched_pharmacy_id is normalized for consistent lookup
+                        # matched_pharmacy_id might be from fuzzy matching and could have dashes
+                        normalized_matched_for_fuzzy = str(matched_pharmacy_id).replace('-', '_')
                         # Try with matched_pharmacy_id (could be fuzzy-matched)
-                        lookup_key_fuzzy = f"{matched_pharmacy_id}|PID|{product_id}"
+                        lookup_key_fuzzy = f"{normalized_matched_for_fuzzy}|PID|{product_id}"
                         master_records = master_lookup.get(lookup_key_fuzzy, [])
                         if master_records:
                             match_method = "fuzzy" if match_method != "exact_pharmacy_fuzzy" else "fuzzy_pharmacy_and_product"
+                            matched_pharmacy_id = normalized_matched_for_fuzzy  # Update for invoice creation
                             logger.debug(f"Fuzzy matched: '{row['product']}' -> '{matched_original}' (ID: {product_id}) for pharmacy {matched_pharmacy_id}")
                         
                         # NEW: Also try variant mapping with original generated_id for fuzzy product matching
@@ -597,7 +699,9 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                         if not master_records and matched_pharmacy_id == normalized_id:
                             fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data, db)
                             if fuzzy_pharmacy_match:
-                                matched_pharmacy_id, sample_record = fuzzy_pharmacy_match
+                                matched_pharmacy_id_raw, sample_record = fuzzy_pharmacy_match
+                                # Normalize the matched pharmacy_id for consistent lookup
+                                matched_pharmacy_id = str(matched_pharmacy_id_raw).replace('-', '_')
                                 lookup_key_fuzzy = f"{matched_pharmacy_id}|PID|{product_id}"
                                 master_records = master_lookup.get(lookup_key_fuzzy, [])
                                 if master_records:

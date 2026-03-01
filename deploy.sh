@@ -60,14 +60,13 @@ cd "$BACKEND_DIR"
 # Determine best Python version to use
 PYTHON_CMD="python3"
 if command_exists python3.11; then
-    PYTHON_VERSION=$(python3.11 --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
-    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d'.' -f2)
-    if [ "$PYTHON_MINOR" -ge 11 ]; then
         PYTHON_CMD="python3.11"
         echo "✅ Using Python 3.11 for better compatibility"
-    fi
+elif command_exists python3.12; then
+    PYTHON_CMD="python3.12"
+    echo "✅ Using Python 3.12"
 else
-    CURRENT_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
+    CURRENT_VERSION=$(python3 --version 2>&1 | sed -E 's/.*([0-9]+\.[0-9]+).*/\1/')
     CURRENT_MINOR=$(echo $CURRENT_VERSION | cut -d'.' -f2)
     if [ "$CURRENT_MINOR" -ge 13 ]; then
         echo "⚠️  Python 3.13+ detected. Some packages may need updates."

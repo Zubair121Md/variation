@@ -310,35 +310,16 @@ class FileProcessor:
         try:
             from app.database import get_db, MasterMapping
             
-            # Read Excel file with better error handling
-            try:
-                df = pd.read_excel(file_path, engine='openpyxl')
-            except Exception as read_error:
-                logger.error(f"Error reading Excel file: {str(read_error)}")
-                return {
-                    "success": False,
-                    "error": f"Failed to read Excel file: {str(read_error)}. Please ensure the file is a valid Excel file (.xlsx or .xls).",
-                    "processed_rows": 0
-                }
-            
-            # Check if file is empty
-            if df.empty:
-                return {
-                    "success": False,
-                    "error": "The uploaded file is empty. Please ensure the file contains data.",
-                    "processed_rows": 0
-                }
+            # Read Excel file
+            df = pd.read_excel(file_path, engine='openpyxl')
             
             # Validate columns
             is_valid, missing_cols = self.validate_master_columns(df)
             if not is_valid:
-                available_cols = ', '.join(df.columns.tolist()[:10])  # Show first 10 columns
                 return {
                     "success": False,
-                    "error": f"Missing required columns: {', '.join(missing_cols)}. Found columns: {available_cols}{'...' if len(df.columns) > 10 else ''}",
-                    "processed_rows": 0,
-                    "available_columns": df.columns.tolist(),
-                    "required_columns": ['REP_Names', 'Doctor_Names', 'Doctor_ID', 'Pharmacy_Names', 'Pharmacy_ID', 'Product_Names', 'Product_ID', 'Product_Price', 'HQ', 'AREA']
+                    "error": f"Missing required columns: {', '.join(missing_cols)}",
+                    "processed_rows": 0
                 }
             
             # Get database session
@@ -350,82 +331,59 @@ class FileProcessor:
                 validation_errors = []
                 
                 for index, row in df.iterrows():
-                    row_errors = []  # Track errors for THIS row only
-                    try:
-                        processed_row = {
-                            "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
-                            "doctor_name": str(row['Doctor_Names']).strip() if pd.notna(row['Doctor_Names']) else "",
-                            "doctor_id": str(row['Doctor_ID']).strip() if pd.notna(row['Doctor_ID']) else "",
-                            "pharmacy_name": str(row['Pharmacy_Names']).strip() if pd.notna(row['Pharmacy_Names']) else "",
-                            "pharmacy_id": str(row['Pharmacy_ID']).strip() if pd.notna(row['Pharmacy_ID']) else "",
-                            "product_name": str(row['Product_Names']).strip() if pd.notna(row['Product_Names']) else "",
-                            "product_id": str(row['Product_ID']).strip() if pd.notna(row['Product_ID']) else "",
-                            "product_price": float(row['Product_Price']) if pd.notna(row['Product_Price']) else 0.0,
-                            "hq": str(row['HQ']).strip() if pd.notna(row['HQ']) else "",
-                            "area": str(row['AREA']).strip() if pd.notna(row['AREA']) else "",
-                            "row_index": index + 2
-                        }
-                    except (KeyError, ValueError, TypeError) as row_error:
-                        validation_errors.append({
-                            "row": index + 2,
-                            "field": "Data conversion",
-                            "error": f"Error processing row data: {str(row_error)}"
-                        })
-                        logger.warning(f"Row {index + 2}: Data conversion error: {str(row_error)}")
-                        continue
+                    processed_row = {
+                        "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
+                        "doctor_name": str(row['Doctor_Names']).strip() if pd.notna(row['Doctor_Names']) else "",
+                        "doctor_id": str(row['Doctor_ID']).strip() if pd.notna(row['Doctor_ID']) else "",
+                        "pharmacy_name": str(row['Pharmacy_Names']).strip() if pd.notna(row['Pharmacy_Names']) else "",
+                        "pharmacy_id": str(row['Pharmacy_ID']).strip() if pd.notna(row['Pharmacy_ID']) else "",
+                        "product_name": str(row['Product_Names']).strip() if pd.notna(row['Product_Names']) else "",
+                        "product_id": str(row['Product_ID']).strip() if pd.notna(row['Product_ID']) else "",
+                        "product_price": float(row['Product_Price']) if pd.notna(row['Product_Price']) else 0.0,
+                        "hq": str(row['HQ']).strip() if pd.notna(row['HQ']) else "",
+                        "area": str(row['AREA']).strip() if pd.notna(row['AREA']) else "",
+                        "row_index": index + 2
+                    }
                     
-                    # Validate required fields for THIS row
+                    # Validate required fields
                     if not processed_row["pharmacy_name"]:
-                        row_errors.append({
+                        validation_errors.append({
                             "row": index + 2,
                             "field": "Pharmacy_Names",
                             "error": "Pharmacy name is required"
                         })
                     
                     if not processed_row["pharmacy_id"]:
-                        row_errors.append({
+                        validation_errors.append({
                             "row": index + 2,
                             "field": "Pharmacy_ID",
                             "error": "Pharmacy ID is required"
                         })
                     
                     if processed_row["product_price"] <= 0:
-                        row_errors.append({
+                        validation_errors.append({
                             "row": index + 2,
                             "field": "Product_Price",
                             "error": "Product price must be greater than 0"
                         })
                     
-                    # Add row errors to global validation_errors list
-                    validation_errors.extend(row_errors)
+                    # Store in database if valid
+                    if not validation_errors or all(error["row"] != index + 2 for error in validation_errors):
+                        master_record = MasterMapping(
+                            pharmacy_id=processed_row["pharmacy_id"].replace('-', '_'),
+                            pharmacy_names=processed_row["pharmacy_name"],
+                            product_names=processed_row["product_name"],
+                            product_id=processed_row["product_id"] if processed_row["product_id"] else None,
+                            product_price=processed_row["product_price"],
+                            doctor_names=processed_row["doctor_name"],
+                            doctor_id=processed_row["doctor_id"],
+                            rep_names=processed_row["rep_name"],
+                            hq=processed_row["hq"],
+                            area=processed_row["area"]
+                        )
+                        db.add(master_record)
                     
-                    # Store in database ONLY if THIS row has no errors
-                    if not row_errors:
-                        try:
-                            master_record = MasterMapping(
-                                pharmacy_id=processed_row["pharmacy_id"].replace('-', '_'),
-                                pharmacy_names=processed_row["pharmacy_name"],
-                                product_names=processed_row["product_name"],
-                                product_id=processed_row["product_id"] if processed_row["product_id"] else None,
-                                product_price=processed_row["product_price"],
-                                doctor_names=processed_row["doctor_name"],
-                                doctor_id=processed_row["doctor_id"],
-                                rep_names=processed_row["rep_name"],
-                                hq=processed_row["hq"],
-                                area=processed_row["area"]
-                            )
-                            db.add(master_record)
-                            processed_data.append(processed_row)
-                            logger.debug(f"Row {index + 2}: Added to database - Pharmacy: {processed_row['pharmacy_name']}, Product: {processed_row['product_name']}")
-                        except Exception as db_error:
-                            logger.error(f"Row {index + 2}: Database error: {str(db_error)}")
-                            validation_errors.append({
-                                "row": index + 2,
-                                "field": "Database",
-                                "error": f"Failed to save to database: {str(db_error)}"
-                            })
-                    else:
-                        logger.warning(f"Row {index + 2}: Skipped due to validation errors: {[e['error'] for e in row_errors]}")
+                    processed_data.append(processed_row)
                 
                 # Commit to database
                 db.commit()
@@ -438,47 +396,26 @@ class FileProcessor:
             finally:
                 db.close()
             
-            # Count actually stored rows (only valid ones)
-            valid_rows_count = len(processed_data)
-            error_rows_count = len(validation_errors)
-            
-            logger.info(f"Master file processing complete: {valid_rows_count} valid rows stored, {error_rows_count} rows with errors")
-            
             return {
                 "success": True,
-                "processed_rows": valid_rows_count,  # Only count rows actually stored in DB
+                "processed_rows": len(processed_data),
                 "data": processed_data,
                 "validation_errors": validation_errors,
                 "summary": {
                     "total_rows": len(df),
-                    "valid_rows": valid_rows_count,
-                    "error_rows": error_rows_count,
-                    "unique_pharmacies": len(set(d["pharmacy_id"] for d in processed_data if d.get("pharmacy_id"))),
-                    "unique_products": len(set(d["product_id"] for d in processed_data if d.get("product_id") and d["product_id"]))
+                    "valid_rows": len(processed_data) - len(validation_errors),
+                    "error_rows": len(validation_errors),
+                    "unique_pharmacies": len(set(d["pharmacy_id"] for d in processed_data if d["pharmacy_id"])),
+                    "unique_products": len(set(d["product_id"] for d in processed_data if d["product_id"]))
                 }
             }
             
         except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            logger.error(f"Error processing master file: {str(e)}\n{error_trace}")
-            
-            # Provide more specific error messages
-            error_msg = str(e)
-            if "No such file" in error_msg or "FileNotFoundError" in error_msg:
-                error_msg = "File not found. Please ensure the file was uploaded correctly."
-            elif "Permission denied" in error_msg:
-                error_msg = "Permission denied accessing the file. Please try again."
-            elif "database" in error_msg.lower() or "connection" in error_msg.lower():
-                error_msg = f"Database error: {error_msg}. Please try again or contact support."
-            elif "openpyxl" in error_msg.lower() or "xlrd" in error_msg.lower():
-                error_msg = f"Excel file error: {error_msg}. Please ensure the file is a valid Excel file (.xlsx or .xls)."
-            
+            logger.error(f"Error processing master file: {str(e)}")
             return {
                 "success": False,
-                "error": error_msg,
-                "processed_rows": 0,
-                "error_type": type(e).__name__
+                "error": str(e),
+                "processed_rows": 0
             }
     
     def match_invoice_with_master(self, invoice_data: List[Dict], master_data: List[Dict]) -> Dict:
