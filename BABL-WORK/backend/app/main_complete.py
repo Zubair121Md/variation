@@ -1159,7 +1159,14 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
         os.unlink(tmp_file_path)
         
         if not result["success"]:
-            raise HTTPException(status_code=400, detail=result["error"])
+            error_detail = result.get("error", "Unknown error")
+            error_type = result.get("error_type", "ProcessingError")
+            status_code = 400 if "Missing required" in error_detail or "empty" in error_detail.lower() else 500
+            raise HTTPException(
+                status_code=status_code, 
+                detail=error_detail,
+                headers={"X-Error-Type": error_type}
+            )
         
         # Return processing summary (DB already updated inside processor)
         return {
@@ -1171,8 +1178,16 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
             "validation_errors": result.get("validation_errors", [])
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Unexpected error in upload_master: {str(e)}\n{error_trace}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error processing file: {str(e)}. Please check the file format and try again."
+        )
 
 @app.post("/api/v1/upload/enhanced")
 async def upload_enhanced(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):

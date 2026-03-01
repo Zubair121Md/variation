@@ -310,16 +310,35 @@ class FileProcessor:
         try:
             from app.database import get_db, MasterMapping
             
-            # Read Excel file
-            df = pd.read_excel(file_path, engine='openpyxl')
+            # Read Excel file with better error handling
+            try:
+                df = pd.read_excel(file_path, engine='openpyxl')
+            except Exception as read_error:
+                logger.error(f"Error reading Excel file: {str(read_error)}")
+                return {
+                    "success": False,
+                    "error": f"Failed to read Excel file: {str(read_error)}. Please ensure the file is a valid Excel file (.xlsx or .xls).",
+                    "processed_rows": 0
+                }
+            
+            # Check if file is empty
+            if df.empty:
+                return {
+                    "success": False,
+                    "error": "The uploaded file is empty. Please ensure the file contains data.",
+                    "processed_rows": 0
+                }
             
             # Validate columns
             is_valid, missing_cols = self.validate_master_columns(df)
             if not is_valid:
+                available_cols = ', '.join(df.columns.tolist()[:10])  # Show first 10 columns
                 return {
                     "success": False,
-                    "error": f"Missing required columns: {', '.join(missing_cols)}",
-                    "processed_rows": 0
+                    "error": f"Missing required columns: {', '.join(missing_cols)}. Found columns: {available_cols}{'...' if len(df.columns) > 10 else ''}",
+                    "processed_rows": 0,
+                    "available_columns": df.columns.tolist(),
+                    "required_columns": ['REP_Names', 'Doctor_Names', 'Doctor_ID', 'Pharmacy_Names', 'Pharmacy_ID', 'Product_Names', 'Product_ID', 'Product_Price', 'HQ', 'AREA']
                 }
             
             # Get database session
@@ -331,19 +350,27 @@ class FileProcessor:
                 validation_errors = []
                 
                 for index, row in df.iterrows():
-                    processed_row = {
-                        "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
-                        "doctor_name": str(row['Doctor_Names']).strip() if pd.notna(row['Doctor_Names']) else "",
-                        "doctor_id": str(row['Doctor_ID']).strip() if pd.notna(row['Doctor_ID']) else "",
-                        "pharmacy_name": str(row['Pharmacy_Names']).strip() if pd.notna(row['Pharmacy_Names']) else "",
-                        "pharmacy_id": str(row['Pharmacy_ID']).strip() if pd.notna(row['Pharmacy_ID']) else "",
-                        "product_name": str(row['Product_Names']).strip() if pd.notna(row['Product_Names']) else "",
-                        "product_id": str(row['Product_ID']).strip() if pd.notna(row['Product_ID']) else "",
-                        "product_price": float(row['Product_Price']) if pd.notna(row['Product_Price']) else 0.0,
-                        "hq": str(row['HQ']).strip() if pd.notna(row['HQ']) else "",
-                        "area": str(row['AREA']).strip() if pd.notna(row['AREA']) else "",
-                        "row_index": index + 2
-                    }
+                    try:
+                        processed_row = {
+                            "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
+                            "doctor_name": str(row['Doctor_Names']).strip() if pd.notna(row['Doctor_Names']) else "",
+                            "doctor_id": str(row['Doctor_ID']).strip() if pd.notna(row['Doctor_ID']) else "",
+                            "pharmacy_name": str(row['Pharmacy_Names']).strip() if pd.notna(row['Pharmacy_Names']) else "",
+                            "pharmacy_id": str(row['Pharmacy_ID']).strip() if pd.notna(row['Pharmacy_ID']) else "",
+                            "product_name": str(row['Product_Names']).strip() if pd.notna(row['Product_Names']) else "",
+                            "product_id": str(row['Product_ID']).strip() if pd.notna(row['Product_ID']) else "",
+                            "product_price": float(row['Product_Price']) if pd.notna(row['Product_Price']) else 0.0,
+                            "hq": str(row['HQ']).strip() if pd.notna(row['HQ']) else "",
+                            "area": str(row['AREA']).strip() if pd.notna(row['AREA']) else "",
+                            "row_index": index + 2
+                        }
+                    except (KeyError, ValueError, TypeError) as row_error:
+                        validation_errors.append({
+                            "row": index + 2,
+                            "field": "Data conversion",
+                            "error": f"Error processing row data: {str(row_error)}"
+                        })
+                        continue
                     
                     # Validate required fields
                     if not processed_row["pharmacy_name"]:
@@ -411,11 +438,26 @@ class FileProcessor:
             }
             
         except Exception as e:
-            logger.error(f"Error processing master file: {str(e)}")
+            import traceback
+            error_trace = traceback.format_exc()
+            logger.error(f"Error processing master file: {str(e)}\n{error_trace}")
+            
+            # Provide more specific error messages
+            error_msg = str(e)
+            if "No such file" in error_msg or "FileNotFoundError" in error_msg:
+                error_msg = "File not found. Please ensure the file was uploaded correctly."
+            elif "Permission denied" in error_msg:
+                error_msg = "Permission denied accessing the file. Please try again."
+            elif "database" in error_msg.lower() or "connection" in error_msg.lower():
+                error_msg = f"Database error: {error_msg}. Please try again or contact support."
+            elif "openpyxl" in error_msg.lower() or "xlrd" in error_msg.lower():
+                error_msg = f"Excel file error: {error_msg}. Please ensure the file is a valid Excel file (.xlsx or .xls)."
+            
             return {
                 "success": False,
-                "error": str(e),
-                "processed_rows": 0
+                "error": error_msg,
+                "processed_rows": 0,
+                "error_type": type(e).__name__
             }
     
     def match_invoice_with_master(self, invoice_data: List[Dict], master_data: List[Dict]) -> Dict:
@@ -425,9 +467,12 @@ class FileProcessor:
         # Create master lookup by pharmacy_id + product
         master_lookup = {}
         
+        # Use the standard normalize_product_name from tasks_enhanced for consistency
+        from app.tasks_enhanced import normalize_product_name
+        
         for master_row in master_data:
-            # Normalize product name for matching
-            normalized_product = self._normalize_product_name(master_row["product_name"])
+            # Normalize product name for matching using standard function
+            normalized_product = normalize_product_name(master_row["product_name"])
             key = f"{master_row['pharmacy_id']}|{normalized_product}"
             master_lookup[key] = master_row
         
@@ -440,8 +485,8 @@ class FileProcessor:
             # Normalize ID for matching (replace - with _)
             normalized_id = generated_id.replace("-", "_")
             
-            # Normalize product name for matching
-            normalized_product = self._normalize_product_name(invoice_row["product"])
+            # Normalize product name for matching using standard function
+            normalized_product = normalize_product_name(invoice_row["product"])
             
             # Create composite key for lookup
             lookup_key = f"{normalized_id}|{normalized_product}"
@@ -490,10 +535,5 @@ class FileProcessor:
             }
         }
     
-    def _normalize_product_name(self, product_name: str) -> str:
-        """
-        Normalize product name for matching: uppercase, remove punctuation, trim spaces
-        """
-        if not product_name or pd.isna(product_name):
-            return ""
-        return re.sub(r'[^\w\s]', '', str(product_name)).strip().upper().replace(' ', '')
+    # REMOVED: _normalize_product_name - now using standard normalize_product_name from tasks_enhanced
+    # This eliminates duplicate normalization logic and ensures consistent matching
