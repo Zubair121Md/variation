@@ -1063,8 +1063,19 @@ file_processor = FileProcessor()
 # Upload endpoints
 @app.post("/api/v1/upload/invoice-only")
 async def upload_invoice(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
+    logger.info(f"Upload invoice endpoint called by user: {current_user.username}")
+    
+    # Check if file was actually received
+    if not file:
+        logger.error("No file object received in upload_invoice")
+        raise HTTPException(status_code=400, detail="No file provided in request")
+    if not file.filename:
+        logger.error(f"File object received but no filename: {type(file)}")
+        raise HTTPException(status_code=400, detail="File has no filename")
+    if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    
+    logger.info(f"Received file upload request: {file.filename}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
     
     tmp_file_path = None
     try:
