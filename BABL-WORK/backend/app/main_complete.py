@@ -88,6 +88,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Exception handler for validation errors (422)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    """Handle FastAPI validation errors and return user-friendly messages"""
+    errors = []
+    for error in exc.errors():
+        field = ".".join(str(loc) for loc in error.get("loc", []))
+        msg = error.get("msg", "Validation error")
+        errors.append(f"{field}: {msg}")
+    
+    logger.error(f"Validation error on {request.url.path}: {errors}")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": errors[0] if len(errors) == 1 else errors,
+            "errors": errors
+        }
+    )
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Pydantic models
