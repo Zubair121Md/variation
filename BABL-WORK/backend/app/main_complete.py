@@ -1111,32 +1111,6 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
             tmp_file_path = tmp_file.name
             logger.info(f"Saved temporary file: {tmp_file_path}, size: {len(content)} bytes")
         
-        # Ensure user exists in database before processing (for foreign key constraint)
-        from app.database import get_db, User
-        user_id = current_user.id if hasattr(current_user, 'id') else 1
-        db = next(get_db())
-        try:
-            db_user = db.query(User).filter(User.id == user_id).first()
-            if not db_user:
-                logger.warning(f"User {user_id} not found in database, creating...")
-                from app.auth import get_password_hash
-                db_user = User(
-                    id=user_id,
-                    username=current_user.username,
-                    email=current_user.email if hasattr(current_user, 'email') else f"user{user_id}@pharmacy.com",
-                    password_hash=get_password_hash("admin123"),
-                    role=current_user.role if hasattr(current_user, 'role') else "user",
-                    area=None
-                )
-                db.add(db_user)
-                db.commit()
-                logger.info(f"Created user {user_id} ({current_user.username}) in database")
-        except Exception as e:
-            logger.error(f"Error ensuring user exists: {str(e)}")
-            db.rollback()
-        finally:
-            db.close()
-        
         # Process the invoice file
         logger.info(f"Processing invoice file: {tmp_file_path}")
         result = file_processor.process_invoice_file(tmp_file_path, user_id=user_id)
