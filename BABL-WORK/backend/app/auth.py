@@ -35,7 +35,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    """Hash a password"""
+    """Hash a password - ensure it's not already hashed and truncate if needed"""
+    # Ensure password is a string and not already hashed
+    if not isinstance(password, str):
+        password = str(password)
+    # Bcrypt has 72 byte limit - truncate if needed (shouldn't happen with normal passwords)
+    if len(password.encode('utf-8')) > 72:
+        logger.warning(f"Password too long ({len(password.encode('utf-8'))} bytes), truncating to 72 bytes")
+        password = password[:72]
     return pwd_context.hash(password)
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):

@@ -31,14 +31,27 @@ app = FastAPI(
 # Ensure DB tables and critical schema adjustments are present on startup
 @app.on_event("startup")
 async def _startup_db_prepare():
-    try:
-        await _init_db()
-    except Exception:
-        # init_db may be sync in some setups; best-effort call
+    # Initialize database with retry logic
+    import asyncio
+    import time
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
         try:
-            _init_db()  # type: ignore
-        except Exception:
-            pass
+            # Try async first
+            if asyncio.iscoroutinefunction(_init_db):
+                await _init_db()
+            else:
+                _init_db()
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database initialization attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Database initialization failed after {max_retries} attempts: {e}")
+                # Don't fail startup - app can still run, just without default users
     # Ensure unmatched columns (product/quantity/amount) exist
     try:
         _ensure_unmatched_schema()

@@ -52,12 +52,14 @@ else:
         # For Render PostgreSQL, use SSL
         connect_args = {"sslmode": "require"}
     
+    # Reduce pool size for free tier and add connection retry
     engine = create_engine(
         DATABASE_URL,
         poolclass=QueuePool,
-        pool_size=20,
-        max_overflow=30,
+        pool_size=5,  # Reduced for free tier
+        max_overflow=10,  # Reduced for free tier
         pool_pre_ping=True,
+        pool_recycle=300,  # Recycle connections every 5 minutes
         echo=False,
         connect_args=connect_args
     )
@@ -455,8 +457,8 @@ except Exception as _e:
     logger.warning(f"Initial metadata creation/schema ensure failed: {_e}")
 
 # Initialize database
-async def init_db():
-    """Initialize database tables"""
+def init_db():
+    """Initialize database tables (synchronous version for startup)"""
     try:
         # Create all tables
         Base.metadata.create_all(bind=engine)
@@ -472,38 +474,43 @@ async def init_db():
             
             # Check if users exist
             if not db.query(User).filter(User.username == "admin").first():
-                # Create Super Admin
-                admin_user = User(
-                    username="admin",
-                    email="admin@pharmacy.com",
-                    password_hash=get_password_hash("admin123"),
-                    role="super_admin",
-                    area=None
-                )
-                db.add(admin_user)
-                
-                # Create Admin
-                manager_user = User(
-                    username="manager",
-                    email="manager@pharmacy.com",
-                    password_hash=get_password_hash("manager123"),
-                    role="admin",
-                    area="CALICUT"
-                )
-                db.add(manager_user)
-                
-                # Create User
-                user_user = User(
-                    username="user",
-                    email="user@pharmacy.com",
-                    password_hash=get_password_hash("user123"),
-                    role="user",
-                    area="CALICUT"
-                )
-                db.add(user_user)
-                
-                db.commit()
-                logger.info("Default users created successfully")
+                try:
+                    # Create Super Admin
+                    admin_user = User(
+                        username="admin",
+                        email="admin@pharmacy.com",
+                        password_hash=get_password_hash("admin123"),
+                        role="super_admin",
+                        area=None
+                    )
+                    db.add(admin_user)
+                    
+                    # Create Admin
+                    manager_user = User(
+                        username="manager",
+                        email="manager@pharmacy.com",
+                        password_hash=get_password_hash("manager123"),
+                        role="admin",
+                        area="CALICUT"
+                    )
+                    db.add(manager_user)
+                    
+                    # Create User
+                    user_user = User(
+                        username="user",
+                        email="user@pharmacy.com",
+                        password_hash=get_password_hash("user123"),
+                        role="user",
+                        area="CALICUT"
+                    )
+                    db.add(user_user)
+                    
+                    db.commit()
+                    logger.info("Default users created successfully")
+                except Exception as user_error:
+                    db.rollback()
+                    logger.error(f"Error creating default users: {user_error}")
+                    # Don't fail the entire startup if user creation fails
             
             # Load sample master data
             if not db.query(MasterMapping).first():
