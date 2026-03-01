@@ -592,20 +592,11 @@ function MasterDataManagement() {
       setSuccess(null);
 
       try {
-        console.log('Preparing to upload file:', {
-          name: file.name,
-          size: file.size,
-          type: file.type
-        });
-        
         const formData = new FormData();
         formData.append('file', file);
-        
-        // Verify FormData has the file
-        console.log('FormData keys:', Array.from(formData.keys()));
-        console.log('FormData file entry:', formData.get('file'));
 
         // Don't set Content-Type manually - axios will set it automatically with boundary
+        // Production FastAPI strictly validates multipart/form-data and requires the boundary parameter
         const response = await api.post('/api/v1/upload/master-only', formData, {
           timeout: 120000, // 2 minutes for large files
         });
@@ -618,34 +609,8 @@ function MasterDataManagement() {
           setSearchQuery(''); // Clear search after upload
         }, 1000);
       } catch (err) {
-        // Handle FastAPI validation errors (422) - detail can be an array of objects
-        let errorMessage = 'Failed to upload master file';
-        if (err.response?.data) {
-          const data = err.response.data;
-          console.error('Upload error response:', data);
-          
-          if (data.detail) {
-            const detail = data.detail;
-            if (Array.isArray(detail)) {
-              // FastAPI validation errors are arrays of objects
-              errorMessage = detail.map(e => {
-                if (typeof e === 'string') return e;
-                return `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`;
-              }).join(', ');
-            } else if (typeof detail === 'string') {
-              errorMessage = detail;
-            } else if (typeof detail === 'object') {
-              errorMessage = detail.msg || detail.message || JSON.stringify(detail);
-            }
-          } else if (data.errors) {
-            errorMessage = Array.isArray(data.errors) ? data.errors.join(', ') : JSON.stringify(data.errors);
-          }
-        } else if (err.message) {
-          errorMessage = err.message;
-        }
-        setError(errorMessage);
+        setError(err.response?.data?.detail || 'Failed to upload master file');
         console.error('Error uploading master file:', err);
-        console.error('Error response data:', err.response?.data);
       } finally {
         setUploading(false);
       }

@@ -26,6 +26,12 @@ api.interceptors.request.use(
     } else {
       console.warn('No token found in localStorage for request:', config.url);
     }
+    
+    // For FormData, remove Content-Type header if manually set - let axios set it with boundary
+    if (config.data instanceof FormData && config.headers['Content-Type']) {
+      delete config.headers['Content-Type'];
+    }
+    
     return config;
   },
   (error) => {
@@ -65,6 +71,8 @@ export const authAPI = {
 export const uploadAPI = {
   uploadInvoice: (formData) => api.post('/api/v1/upload/invoice-only', formData, {
     // Don't set Content-Type - let axios set it automatically with boundary for FormData
+    // This ensures Authorization header is also sent properly
+    // Production FastAPI strictly validates multipart/form-data and requires the boundary parameter
     timeout: 120000, // 2 minutes for large files
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
