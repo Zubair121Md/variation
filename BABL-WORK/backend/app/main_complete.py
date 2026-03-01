@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Body, Query
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from collections import defaultdict
@@ -1133,8 +1135,11 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
 
 @app.post("/api/v1/upload/master-only")
 async def upload_master(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    # Check if file was actually received
+    if not file:
+        raise HTTPException(status_code=400, detail="No file provided in request")
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
+        raise HTTPException(status_code=400, detail="File has no filename")
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
     

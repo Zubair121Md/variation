@@ -11,7 +11,22 @@ export const uploadInvoice = createAsyncThunk(
       const response = await uploadAPI.uploadInvoice(formData);
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.detail || 'Failed to upload invoice');
+      // Handle FastAPI validation errors (422)
+      let errorMessage = 'Failed to upload invoice';
+      if (error.response?.data?.detail) {
+        const detail = error.response.data.detail;
+        if (Array.isArray(detail)) {
+          errorMessage = detail.map(e => typeof e === 'string' ? e : `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`).join(', ');
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else if (typeof detail === 'object') {
+          errorMessage = detail.msg || detail.message || JSON.stringify(detail);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      console.error('Upload invoice error:', error.response?.data || error);
+      return rejectWithValue(errorMessage);
     }
   }
 );
@@ -25,7 +40,22 @@ export const uploadMaster = createAsyncThunk(
       const response = await uploadAPI.uploadMaster(formData);
       return response.data;
     } catch (error) {
-      return rejectWithValue(error.response?.data?.detail || 'Failed to upload master file');
+      // Handle FastAPI validation errors (422)
+      let errorMessage = 'Failed to upload master file';
+      if (error.response?.data?.detail) {
+        const detail = error.response.data.detail;
+        if (Array.isArray(detail)) {
+          errorMessage = detail.map(e => typeof e === 'string' ? e : `${e.loc?.join('.') || 'field'}: ${e.msg || 'validation error'}`).join(', ');
+        } else if (typeof detail === 'string') {
+          errorMessage = detail;
+        } else if (typeof detail === 'object') {
+          errorMessage = detail.msg || detail.message || JSON.stringify(detail);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      console.error('Upload master error:', error.response?.data || error);
+      return rejectWithValue(errorMessage);
     }
   }
 );
