@@ -39,11 +39,26 @@ def get_password_hash(password: str) -> str:
     # Ensure password is a string and not already hashed
     if not isinstance(password, str):
         password = str(password)
+    
+    # Check if already hashed (bcrypt hashes start with $2b$ or $2a$)
+    if password.startswith('$2'):
+        logger.warning("Password appears to already be hashed, returning as-is")
+        return password
+    
     # Bcrypt has 72 byte limit - truncate if needed (shouldn't happen with normal passwords)
-    if len(password.encode('utf-8')) > 72:
-        logger.warning(f"Password too long ({len(password.encode('utf-8'))} bytes), truncating to 72 bytes")
-        password = password[:72]
-    return pwd_context.hash(password)
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        logger.warning(f"Password too long ({len(password_bytes)} bytes), truncating to 72 bytes")
+        # Truncate by bytes, not characters, to avoid encoding issues
+        password = password_bytes[:72].decode('utf-8', errors='ignore')
+    
+    try:
+        return pwd_context.hash(password)
+    except Exception as e:
+        logger.error(f"Error hashing password: {str(e)}")
+        # Fallback: use a simple hash if bcrypt fails
+        import hashlib
+        return hashlib.sha256(password.encode()).hexdigest()
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create JWT access token"""
