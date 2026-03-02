@@ -24,7 +24,10 @@ api.interceptors.request.use(
         console.log('Reset system request - Headers:', config.headers);
       }
     } else {
-      console.warn('No token found in localStorage for request:', config.url);
+      // Only warn for non-auth endpoints (login doesn't need token)
+      if (!config.url?.includes('/auth/login') && !config.url?.includes('/health')) {
+        console.warn('No token found in localStorage for request:', config.url);
+      }
     }
     
     // For FormData, remove Content-Type header if manually set - let axios set it with boundary

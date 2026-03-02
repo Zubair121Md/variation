@@ -596,10 +596,7 @@ function MasterDataManagement() {
         formData.append('file', file);
 
         // Don't set Content-Type manually - axios will set it automatically with boundary
-        // Production FastAPI strictly validates multipart/form-data and requires the boundary parameter
-        const response = await api.post('/api/v1/upload/master-only', formData, {
-          timeout: 120000, // 2 minutes for large files
-        });
+        const response = await api.post('/api/v1/upload/master-only', formData);
 
         setSuccess(`Master file uploaded successfully! Processed ${response.data.rows_processed || 0} rows.`);
         
@@ -609,8 +606,23 @@ function MasterDataManagement() {
           setSearchQuery(''); // Clear search after upload
         }, 1000);
       } catch (err) {
-        setError(err.response?.data?.detail || 'Failed to upload master file');
-        console.error('Error uploading master file:', err);
+        // Get detailed error message
+        let errorMessage = 'Failed to upload master file';
+        if (err.response) {
+          // Server responded with error
+          errorMessage = err.response.data?.detail || err.response.data?.message || err.response.data?.error || errorMessage;
+          console.error('Server error response:', err.response.status, err.response.data);
+        } else if (err.request) {
+          // Request was made but no response
+          errorMessage = 'No response from server. Please check your connection.';
+          console.error('No response received:', err.request);
+        } else {
+          // Error setting up request
+          errorMessage = err.message || errorMessage;
+          console.error('Request setup error:', err.message);
+        }
+        setError(errorMessage);
+        console.error('Full error object:', err);
       } finally {
         setUploading(false);
       }
