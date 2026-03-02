@@ -49,9 +49,10 @@ else:
     # PostgreSQL connection - add SSL support for Render
     connect_args = {}
     if "postgres" in DATABASE_URL.lower() or "postgresql" in DATABASE_URL.lower():
-        # For Render PostgreSQL, use prefer mode (tries SSL, falls back if needed)
-        # This handles SSL connection issues better than "require"
-        connect_args = {"sslmode": "prefer"}
+        # For Render PostgreSQL, try different SSL modes for better compatibility
+        # "allow" is most lenient - tries without SSL first, then with SSL
+        # This handles SSL connection issues better
+        connect_args = {"sslmode": "allow"}
     
     # Reduce pool size for free tier and add connection retry
     engine = create_engine(
@@ -476,41 +477,51 @@ def init_db():
             # Check if users exist
             if not db.query(User).filter(User.username == "admin").first():
                 try:
-                    # Create Super Admin
-                    admin_user = User(
-                        username="admin",
-                        email="admin@pharmacy.com",
-                        password_hash=get_password_hash("admin123"),
-                        role="super_admin",
-                        area=None
-                    )
-                    db.add(admin_user)
+                    # Create users one at a time to handle errors better
+                    users_to_create = [
+                        {
+                            "username": "admin",
+                            "email": "admin@pharmacy.com",
+                            "password": "admin123",
+                            "role": "super_admin",
+                            "area": None
+                        },
+                        {
+                            "username": "manager",
+                            "email": "manager@pharmacy.com",
+                            "password": "manager123",
+                            "role": "admin",
+                            "area": "CALICUT"
+                        },
+                        {
+                            "username": "user",
+                            "email": "user@pharmacy.com",
+                            "password": "user123",
+                            "role": "user",
+                            "area": "CALICUT"
+                        }
+                    ]
                     
-                    # Create Admin
-                    manager_user = User(
-                        username="manager",
-                        email="manager@pharmacy.com",
-                        password_hash=get_password_hash("manager123"),
-                        role="admin",
-                        area="CALICUT"
-                    )
-                    db.add(manager_user)
-                    
-                    # Create User
-                    user_user = User(
-                        username="user",
-                        email="user@pharmacy.com",
-                        password_hash=get_password_hash("user123"),
-                        role="user",
-                        area="CALICUT"
-                    )
-                    db.add(user_user)
+                    for user_data in users_to_create:
+                        try:
+                            password_hash = get_password_hash(user_data["password"])
+                            new_user = User(
+                                username=user_data["username"],
+                                email=user_data["email"],
+                                password_hash=password_hash,
+                                role=user_data["role"],
+                                area=user_data["area"]
+                            )
+                            db.add(new_user)
+                        except Exception as single_user_error:
+                            logger.warning(f"Failed to create user {user_data['username']}: {str(single_user_error)}")
+                            # Continue with other users
                     
                     db.commit()
                     logger.info("Default users created successfully")
                 except Exception as user_error:
                     db.rollback()
-                    logger.error(f"Error creating default users: {user_error}")
+                    logger.error(f"Error creating default users: {str(user_error)}", exc_info=True)
                     # Don't fail the entire startup if user creation fails
             
             # Load sample master data

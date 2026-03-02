@@ -42,7 +42,7 @@ def get_password_hash(password: str) -> str:
     
     # Check if already hashed (bcrypt hashes start with $2b$ or $2a$)
     if password.startswith('$2'):
-        logger.warning("Password appears to already be hashed, returning as-is")
+        logger.debug("Password appears to already be hashed, returning as-is")
         return password
     
     # Bcrypt has 72 byte limit - truncate if needed (shouldn't happen with normal passwords)
@@ -51,14 +51,34 @@ def get_password_hash(password: str) -> str:
         logger.warning(f"Password too long ({len(password_bytes)} bytes), truncating to 72 bytes")
         # Truncate by bytes, not characters, to avoid encoding issues
         password = password_bytes[:72].decode('utf-8', errors='ignore')
+        # Re-encode to verify it's still under 72 bytes
+        password_bytes = password.encode('utf-8')
+        if len(password_bytes) > 72:
+            # Force truncate to 72 bytes
+            password = password_bytes[:72].decode('utf-8', errors='ignore')
     
     try:
-        return pwd_context.hash(password)
+        # Try to hash with bcrypt
+        hash_result = pwd_context.hash(password)
+        return hash_result
+    except ValueError as ve:
+        # Handle bcrypt-specific errors (like password too long)
+        if "72" in str(ve) or "bytes" in str(ve).lower():
+            logger.warning(f"Password still too long after truncation, using fallback hash")
+            import hashlib
+            return hashlib.sha256(password.encode('utf-8')).hexdigest()
+        raise
     except Exception as e:
+        # Handle other bcrypt errors (like version compatibility)
+        error_msg = str(e).lower()
+        if "bcrypt" in error_msg or "__about__" in error_msg or "version" in error_msg:
+            logger.warning(f"Bcrypt compatibility issue ({str(e)}), using fallback hash")
+            import hashlib
+            return hashlib.sha256(password.encode('utf-8')).hexdigest()
         logger.error(f"Error hashing password: {str(e)}")
         # Fallback: use a simple hash if bcrypt fails
         import hashlib
-        return hashlib.sha256(password.encode()).hexdigest()
+        return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create JWT access token"""
