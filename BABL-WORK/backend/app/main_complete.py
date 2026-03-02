@@ -1089,25 +1089,57 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
             if not db_user:
                 logger.warning(f"User {user_id} not found in database, creating...")
                 from app.auth import get_password_hash
-                db_user = User(
-                    id=user_id,
-                    username=current_user.username,
-                    email=current_user.email if hasattr(current_user, 'email') else f"user{user_id}@pharmacy.com",
-                    password_hash=get_password_hash("admin123"),  # Default password
-                    role=current_user.role if hasattr(current_user, 'role') else "user",
-                    area=None
+                try:
+                    # Use a simple, short password that will definitely work
+                    default_password = "admin123"
+                    password_hash = get_password_hash(default_password)
+                    
+                    db_user = User(
+                        id=user_id,
+                        username=current_user.username,
+                        email=current_user.email if hasattr(current_user, 'email') else f"user{user_id}@pharmacy.com",
+                        password_hash=password_hash,
+                        role=current_user.role if hasattr(current_user, 'role') else "user",
+                        area=None
+                    )
+                    db.add(db_user)
+                    db.commit()
+                    db.refresh(db_user)  # Refresh to ensure it's in the session
+                    logger.info(f"Created user {user_id} ({current_user.username}) in database")
+                except Exception as user_create_error:
+                    logger.error(f"Failed to create user {user_id}: {str(user_create_error)}", exc_info=True)
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=500, 
+                        detail=f"Failed to create user in database: {str(user_create_error)}"
+                    )
+            
+            # Verify user exists before proceeding
+            db_user = db.query(User).filter(User.id == user_id).first()
+            if not db_user:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"User {user_id} does not exist in database and could not be created"
                 )
-                db.add(db_user)
-                db.commit()
-                logger.info(f"Created user {user_id} in database")
             
             # Clear existing invoice data for this user before processing new file
-            db.query(Invoice).filter(Invoice.user_id == user_id).delete()
-            db.commit()
-            logger.info(f"Cleared existing invoice data for user {user_id}")
+            try:
+                deleted_count = db.query(Invoice).filter(Invoice.user_id == user_id).delete()
+                db.commit()
+                logger.info(f"Cleared {deleted_count} existing invoice records for user {user_id}")
+            except Exception as clear_error:
+                logger.warning(f"Error clearing invoice data: {str(clear_error)}")
+                db.rollback()
+                # Don't fail - continue with upload
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.warning(f"Error ensuring user exists or clearing invoice data: {str(e)}")
+            logger.error(f"Error ensuring user exists or clearing invoice data: {str(e)}", exc_info=True)
             db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database error: {str(e)}"
+            )
         finally:
             db.close()
         
