@@ -49,43 +49,33 @@ def migrate_master_mapping_columns():
         logger = logging.getLogger(__name__)
         logger.info("Starting database schema migration for master_mapping table...")
         
-        # Use autocommit for DDL statements (ALTER TABLE)
-        with engine.connect() as conn:
-            # Start a transaction
-            trans = conn.begin()
-            success_count = 0
-            error_count = 0
-            try:
-                for migration_sql, column_name in migrations:
-                    try:
-                        # Execute DDL statement
-                        conn.execute(text(migration_sql))
-                        conn.commit()  # Commit each statement individually for DDL
-                        logger.info(f"✅ Migration successful: {column_name}")
-                        success_count += 1
-                    except Exception as e:
-                        # Ignore errors like "column already has this type" or "column does not exist"
-                        error_str = str(e).lower()
-                        if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str or "no change" in error_str or "is not distinct" in error_str:
-                            # Column might already be correct or doesn't exist - that's okay
-                            logger.debug(f"⏭️  Migration skipped for {column_name}: {str(e)}")
-                            success_count += 1  # Count as success since it's already correct
-                        else:
-                            # Log other errors but continue
-                            logger.error(f"❌ Migration error for {column_name}: {str(e)}")
-                            error_count += 1
-                        try:
-                            conn.rollback()
-                        except:
-                            pass
-                
-                logger.info(f"Migration completed: {success_count} successful, {error_count} errors")
-            except Exception as e:
+        # Use autocommit mode for DDL statements (ALTER TABLE requires autocommit in some PostgreSQL setups)
+        # Create engine with autocommit for DDL
+        ddl_engine = create_engine(DATABASE_URL, isolation_level="AUTOCOMMIT")
+        
+        success_count = 0
+        error_count = 0
+        
+        with ddl_engine.connect() as conn:
+            for migration_sql, column_name in migrations:
                 try:
-                    trans.rollback()
-                except:
-                    pass
-                logger.error(f"Migration transaction error: {str(e)}", exc_info=True)
+                    # Execute DDL statement (autocommit mode)
+                    conn.execute(text(migration_sql))
+                    logger.info(f"✅ Migration successful: {column_name}")
+                    success_count += 1
+                except Exception as e:
+                    # Ignore errors like "column already has this type" or "column does not exist"
+                    error_str = str(e).lower()
+                    if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str or "no change" in error_str or "is not distinct" in error_str:
+                        # Column might already be correct or doesn't exist - that's okay
+                        logger.debug(f"⏭️  Migration skipped for {column_name}: {str(e)}")
+                        success_count += 1  # Count as success since it's already correct
+                    else:
+                        # Log other errors but continue
+                        logger.error(f"❌ Migration error for {column_name}: {str(e)}", exc_info=True)
+                        error_count += 1
+        
+        logger.info(f"Migration completed: {success_count} successful, {error_count} errors")
     except Exception as e:
         # Don't fail startup if migration fails
         import logging
