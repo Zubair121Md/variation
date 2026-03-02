@@ -30,36 +30,43 @@ def migrate_master_mapping_columns():
                 return
         
         migrations = [
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN rep_names TYPE VARCHAR(200)", "rep_names"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN doctor_names TYPE VARCHAR(200)", "doctor_names"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN doctor_id TYPE VARCHAR(100)", "doctor_id"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN pharmacy_names TYPE VARCHAR(500)", "pharmacy_names"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN pharmacy_id TYPE VARCHAR(100)", "pharmacy_id"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN product_names TYPE VARCHAR(300)", "product_names"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN product_id TYPE VARCHAR(100)", "product_id"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN hq TYPE VARCHAR(100)", "hq"),
-            ("ALTER TABLE prms_master_mapping ALTER COLUMN area TYPE VARCHAR(200)", "area"),
+            # PostgreSQL requires USING clause when changing VARCHAR size
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN rep_names TYPE VARCHAR(200) USING rep_names::VARCHAR(200)", "rep_names"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN doctor_names TYPE VARCHAR(200) USING doctor_names::VARCHAR(200)", "doctor_names"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN doctor_id TYPE VARCHAR(100) USING doctor_id::VARCHAR(100)", "doctor_id"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN pharmacy_names TYPE VARCHAR(500) USING pharmacy_names::VARCHAR(500)", "pharmacy_names"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN pharmacy_id TYPE VARCHAR(100) USING pharmacy_id::VARCHAR(100)", "pharmacy_id"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN product_names TYPE VARCHAR(300) USING product_names::VARCHAR(300)", "product_names"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN product_id TYPE VARCHAR(100) USING product_id::VARCHAR(100)", "product_id"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN hq TYPE VARCHAR(100) USING hq::VARCHAR(100)", "hq"),
+            ("ALTER TABLE prms_master_mapping ALTER COLUMN area TYPE VARCHAR(200) USING area::VARCHAR(200)", "area"),
             # Set defaults for hq and area
             ("ALTER TABLE prms_master_mapping ALTER COLUMN hq SET DEFAULT ''", "hq_default"),
             ("ALTER TABLE prms_master_mapping ALTER COLUMN area SET DEFAULT ''", "area_default"),
         ]
+        
+        import logging
+        logger = logging.getLogger(__name__)
         
         with engine.connect() as conn:
             for migration_sql, column_name in migrations:
                 try:
                     conn.execute(text(migration_sql))
                     conn.commit()
+                    logger.info(f"Migration successful: {column_name}")
                 except Exception as e:
                     # Ignore errors like "column already has this type" or "column does not exist"
                     error_str = str(e).lower()
-                    if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str:
+                    if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str or "no change" in error_str:
                         # Column might already be correct or doesn't exist - that's okay
-                        pass
+                        logger.debug(f"Migration skipped for {column_name}: {str(e)}")
                     else:
                         # Log other errors but continue
-                        import logging
-                        logging.getLogger(__name__).warning(f"Migration for {column_name}: {str(e)}")
-                    conn.rollback()
+                        logger.warning(f"Migration error for {column_name}: {str(e)}")
+                    try:
+                        conn.rollback()
+                    except:
+                        pass
     except Exception as e:
         # Don't fail startup if migration fails
         import logging
