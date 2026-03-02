@@ -311,7 +311,16 @@ class FileProcessor:
             from app.database import get_db, MasterMapping
             
             # Read Excel file
-            df = pd.read_excel(file_path, engine='openpyxl')
+            try:
+                df = pd.read_excel(file_path, engine='openpyxl')
+                logger.info(f"Read Excel file: {len(df)} rows, {len(df.columns)} columns")
+            except Exception as read_error:
+                logger.error(f"Error reading Excel file: {str(read_error)}", exc_info=True)
+                return {
+                    "success": False,
+                    "error": f"Error reading Excel file: {str(read_error)}",
+                    "processed_rows": 0
+                }
             
             # Validate columns
             is_valid, missing_cols = self.validate_master_columns(df)
