@@ -48,25 +48,32 @@ def migrate_master_mapping_columns():
         import logging
         logger = logging.getLogger(__name__)
         
+        # Use autocommit for DDL statements (ALTER TABLE)
         with engine.connect() as conn:
-            for migration_sql, column_name in migrations:
-                try:
-                    conn.execute(text(migration_sql))
-                    conn.commit()
-                    logger.info(f"Migration successful: {column_name}")
-                except Exception as e:
-                    # Ignore errors like "column already has this type" or "column does not exist"
-                    error_str = str(e).lower()
-                    if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str or "no change" in error_str:
-                        # Column might already be correct or doesn't exist - that's okay
-                        logger.debug(f"Migration skipped for {column_name}: {str(e)}")
-                    else:
-                        # Log other errors but continue
-                        logger.warning(f"Migration error for {column_name}: {str(e)}")
+            # Start a transaction
+            trans = conn.begin()
+            try:
+                for migration_sql, column_name in migrations:
                     try:
-                        conn.rollback()
-                    except:
-                        pass
+                        # Execute DDL statement
+                        conn.execute(text(migration_sql))
+                        logger.info(f"Migration successful: {column_name}")
+                    except Exception as e:
+                        # Ignore errors like "column already has this type" or "column does not exist"
+                        error_str = str(e).lower()
+                        if "already" in error_str or "does not exist" in error_str or "cannot alter" in error_str or "no change" in error_str or "is not distinct" in error_str:
+                            # Column might already be correct or doesn't exist - that's okay
+                            logger.debug(f"Migration skipped for {column_name}: {str(e)}")
+                        else:
+                            # Log other errors but continue
+                            logger.warning(f"Migration error for {column_name}: {str(e)}")
+                
+                # Commit all successful migrations
+                trans.commit()
+                logger.info("All migrations committed successfully")
+            except Exception as e:
+                trans.rollback()
+                logger.error(f"Migration transaction rolled back: {str(e)}")
     except Exception as e:
         # Don't fail startup if migration fails
         import logging
