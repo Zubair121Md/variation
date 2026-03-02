@@ -31,6 +31,14 @@ app = FastAPI(
 # Ensure DB tables and critical schema adjustments are present on startup
 @app.on_event("startup")
 async def _startup_db_prepare():
+    # Run database migration to update column sizes if needed (for existing databases)
+    try:
+        from app.migrate_schema import migrate_master_mapping_columns
+        migrate_master_mapping_columns()
+        logger.info("Database schema migration completed")
+    except Exception as e:
+        logger.warning(f"Schema migration skipped: {str(e)}")
+    
     # Initialize database with retry logic
     import asyncio
     import time
