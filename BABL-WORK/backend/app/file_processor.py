@@ -341,16 +341,16 @@ class FileProcessor:
                 
                 for index, row in df.iterrows():
                     processed_row = {
-                        "rep_name": str(row['REP_Names']).strip() if pd.notna(row['REP_Names']) else "",
-                        "doctor_name": str(row['Doctor_Names']).strip() if pd.notna(row['Doctor_Names']) else "",
-                        "doctor_id": str(row['Doctor_ID']).strip() if pd.notna(row['Doctor_ID']) else "",
-                        "pharmacy_name": str(row['Pharmacy_Names']).strip() if pd.notna(row['Pharmacy_Names']) else "",
-                        "pharmacy_id": str(row['Pharmacy_ID']).strip() if pd.notna(row['Pharmacy_ID']) else "",
-                        "product_name": str(row['Product_Names']).strip() if pd.notna(row['Product_Names']) else "",
-                        "product_id": str(row['Product_ID']).strip() if pd.notna(row['Product_ID']) else "",
+                        "rep_name": (str(row['REP_Names']).strip()[:200] if pd.notna(row['REP_Names']) else ""),
+                        "doctor_name": (str(row['Doctor_Names']).strip()[:200] if pd.notna(row['Doctor_Names']) else ""),
+                        "doctor_id": (str(row['Doctor_ID']).strip()[:100] if pd.notna(row['Doctor_ID']) else ""),
+                        "pharmacy_name": (str(row['Pharmacy_Names']).strip()[:500] if pd.notna(row['Pharmacy_Names']) else ""),
+                        "pharmacy_id": (str(row['Pharmacy_ID']).strip()[:100] if pd.notna(row['Pharmacy_ID']) else ""),
+                        "product_name": (str(row['Product_Names']).strip()[:300] if pd.notna(row['Product_Names']) else ""),
+                        "product_id": (str(row['Product_ID']).strip()[:100] if pd.notna(row['Product_ID']) else ""),
                         "product_price": float(row['Product_Price']) if pd.notna(row['Product_Price']) else 0.0,
-                        "hq": str(row['HQ']).strip() if pd.notna(row['HQ']) else "",
-                        "area": str(row['AREA']).strip() if pd.notna(row['AREA']) else "",
+                        "hq": (str(row['HQ']).strip()[:100] if pd.notna(row['HQ']) else ""),
+                        "area": (str(row['AREA']).strip()[:200] if pd.notna(row['AREA']) else ""),
                         "row_index": index + 2
                     }
                     
@@ -379,16 +379,16 @@ class FileProcessor:
                     # Store in database if valid
                     if not validation_errors or all(error["row"] != index + 2 for error in validation_errors):
                         master_record = MasterMapping(
-                            pharmacy_id=processed_row["pharmacy_id"].replace('-', '_'),
-                            pharmacy_names=processed_row["pharmacy_name"],
-                            product_names=processed_row["product_name"],
-                            product_id=processed_row["product_id"] if processed_row["product_id"] else None,
+                            pharmacy_id=processed_row["pharmacy_id"].replace('-', '_')[:100],  # Truncate to 100
+                            pharmacy_names=processed_row["pharmacy_name"][:500],  # Truncate to 500
+                            product_names=processed_row["product_name"][:300],  # Truncate to 300
+                            product_id=processed_row["product_id"][:100] if processed_row["product_id"] else None,  # Truncate to 100
                             product_price=processed_row["product_price"],
-                            doctor_names=processed_row["doctor_name"],
-                            doctor_id=processed_row["doctor_id"],
-                            rep_names=processed_row["rep_name"],
-                            hq=processed_row["hq"],
-                            area=processed_row["area"]
+                            doctor_names=processed_row["doctor_name"][:200],  # Truncate to 200
+                            doctor_id=processed_row["doctor_id"][:100],  # Truncate to 100
+                            rep_names=processed_row["rep_name"][:200],  # Truncate to 200
+                            hq=processed_row["hq"][:100] if processed_row["hq"] else "",  # Ensure not None, truncate to 100
+                            area=processed_row["area"][:200] if processed_row["area"] else ""  # Ensure not None, truncate to 200
                         )
                         db.add(master_record)
                     

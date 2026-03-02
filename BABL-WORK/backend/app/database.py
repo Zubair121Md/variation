@@ -49,8 +49,9 @@ else:
     # PostgreSQL connection - add SSL support for Render
     connect_args = {}
     if "postgres" in DATABASE_URL.lower() or "postgresql" in DATABASE_URL.lower():
-        # For Render PostgreSQL, use SSL
-        connect_args = {"sslmode": "require"}
+        # For Render PostgreSQL, use prefer mode (tries SSL, falls back if needed)
+        # This handles SSL connection issues better than "require"
+        connect_args = {"sslmode": "prefer"}
     
     # Reduce pool size for free tier and add connection retry
     engine = create_engine(
@@ -90,16 +91,16 @@ class MasterMapping(Base):
     __tablename__ = "prms_master_mapping"
     
     id = Column(Integer, primary_key=True, index=True)
-    rep_names = Column(String(100), nullable=False)
-    doctor_names = Column(String(100), nullable=False)
-    doctor_id = Column(String(50), nullable=False, index=True)
-    pharmacy_names = Column(String(200), nullable=False, index=True)
-    pharmacy_id = Column(String(50), nullable=False, index=True)
-    product_names = Column(String(200), nullable=False)
-    product_id = Column(String(50), nullable=True, index=True)
+    rep_names = Column(String(200), nullable=False)  # Increased from 100
+    doctor_names = Column(String(200), nullable=False)  # Increased from 100
+    doctor_id = Column(String(100), nullable=False, index=True)  # Increased from 50
+    pharmacy_names = Column(String(500), nullable=False, index=True)  # Increased from 200 for long names
+    pharmacy_id = Column(String(100), nullable=False, index=True)  # Increased from 50
+    product_names = Column(String(300), nullable=False)  # Increased from 200
+    product_id = Column(String(100), nullable=True, index=True)  # Increased from 50
     product_price = Column(Numeric(10, 2), nullable=False)
-    hq = Column(String(50), nullable=False)
-    area = Column(String(50), nullable=False, index=True)
+    hq = Column(String(100), nullable=False, default="")  # Increased from 50, added default
+    area = Column(String(200), nullable=False, index=True, default="")  # Increased from 50, added default
     source = Column(String(50), default="file_upload")  # file_upload or manual_mapping
     created_at = Column(DateTime, default=datetime.utcnow)
 

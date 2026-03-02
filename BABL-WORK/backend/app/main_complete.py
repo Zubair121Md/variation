@@ -5332,18 +5332,18 @@ async def create_master_data(
         if not record_data.get("pharmacy_id") or not record_data.get("pharmacy_names"):
             raise HTTPException(status_code=400, detail="pharmacy_id and pharmacy_names are required")
         
-        # Create new master mapping record
+        # Create new master mapping record with proper defaults and truncation
         new_record = MasterMapping(
-            pharmacy_id=record_data.get("pharmacy_id"),
-            pharmacy_names=record_data.get("pharmacy_names"),
-            product_names=record_data.get("product_names"),
-            product_id=record_data.get("product_id"),
-            product_price=record_data.get("product_price"),
-            doctor_names=record_data.get("doctor_names"),
-            doctor_id=record_data.get("doctor_id"),
-            rep_names=record_data.get("rep_names"),
-            hq=record_data.get("hq"),
-            area=record_data.get("area")
+            pharmacy_id=(str(record_data.get("pharmacy_id", ""))[:100] if record_data.get("pharmacy_id") else ""),
+            pharmacy_names=(str(record_data.get("pharmacy_names", ""))[:500] if record_data.get("pharmacy_names") else ""),
+            product_names=(str(record_data.get("product_names", ""))[:300] if record_data.get("product_names") else ""),
+            product_id=(str(record_data.get("product_id", ""))[:100] if record_data.get("product_id") else None),
+            product_price=float(record_data.get("product_price", 0)) if record_data.get("product_price") else 0.0,
+            doctor_names=(str(record_data.get("doctor_names", ""))[:200] if record_data.get("doctor_names") else ""),
+            doctor_id=(str(record_data.get("doctor_id", ""))[:100] if record_data.get("doctor_id") else ""),
+            rep_names=(str(record_data.get("rep_names", ""))[:200] if record_data.get("rep_names") else ""),
+            hq=(str(record_data.get("hq", ""))[:100] if record_data.get("hq") else ""),  # Default to empty string, not None
+            area=(str(record_data.get("area", ""))[:200] if record_data.get("area") else "")  # Default to empty string, not None
         )
         
         db.add(new_record)
