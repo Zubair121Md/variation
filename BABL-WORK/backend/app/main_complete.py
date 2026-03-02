@@ -1150,24 +1150,34 @@ async def upload_invoice(file: UploadFile = File(...), current_user: User = Depe
 
 @app.post("/api/v1/upload/master-only")
 async def upload_master(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
-    if not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="File must be an Excel file")
+    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
     
+    tmp_file_path = None
     try:
+        logger.info(f"Upload master file: {file.filename} by user {current_user.username}")
+        
+        # Save uploaded file temporarily first
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+            content = await file.read()
+            if not content:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty")
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+            logger.info(f"Saved temporary file: {tmp_file_path}, size: {len(content)} bytes")
+        
         # Clear existing master data before processing new file
         from app.database import get_db, MasterMapping
         db = next(get_db())
         try:
-            db.query(MasterMapping).delete()
+            deleted_count = db.query(MasterMapping).delete()
             db.commit()
+            logger.info(f"Cleared {deleted_count} existing master data records")
+        except Exception as e:
+            logger.warning(f"Error clearing existing master data: {str(e)}")
+            db.rollback()
         finally:
             db.close()
-        
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            content = await file.read()
-            tmp_file.write(content)
-            tmp_file_path = tmp_file.name
         
         # Process the master file
         logger.info(f"Processing master file: {tmp_file_path}")
@@ -1175,9 +1185,14 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
             result = file_processor.process_master_file(tmp_file_path)
         except Exception as proc_error:
             logger.error(f"Error in process_master_file: {str(proc_error)}", exc_info=True)
+            error_detail = str(proc_error)
+            # Clean up temp file
             if tmp_file_path and os.path.exists(tmp_file_path):
-                os.unlink(tmp_file_path)
-            raise HTTPException(status_code=500, detail=f"Error processing master file: {str(proc_error)}")
+                try:
+                    os.unlink(tmp_file_path)
+                except:
+                    pass
+            raise HTTPException(status_code=500, detail=f"Error processing master file: {error_detail}")
         
         # Clean up temporary file
         if tmp_file_path and os.path.exists(tmp_file_path):
@@ -1192,12 +1207,13 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
             raise HTTPException(status_code=400, detail=error_msg)
         
         # Return processing summary (DB already updated inside processor)
-        logger.info(f"Master file processed successfully: {result.get('processed_rows', 0)} rows")
+        processed_rows = result.get("processed_rows", 0)
+        logger.info(f"Master file processed successfully: {processed_rows} rows")
         return {
             "message": "Master file processed successfully",
             "filename": file.filename,
-            "rows_processed": result.get("processed_rows", 0),
-            "processed_rows": result.get("processed_rows", 0),  # Support both field names
+            "rows_processed": processed_rows,
+            "processed_rows": processed_rows,  # Support both field names
             "status": "completed",
             "summary": result.get("summary", {}),
             "validation_errors": result.get("validation_errors", [])
@@ -1208,7 +1224,7 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
     except Exception as e:
         logger.error(f"Error in upload_master endpoint: {str(e)}", exc_info=True)
         # Clean up temp file if it exists
-        if 'tmp_file_path' in locals() and tmp_file_path and os.path.exists(tmp_file_path):
+        if tmp_file_path and os.path.exists(tmp_file_path):
             try:
                 os.unlink(tmp_file_path)
             except:

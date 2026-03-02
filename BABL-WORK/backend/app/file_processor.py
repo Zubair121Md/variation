@@ -386,12 +386,19 @@ class FileProcessor:
                     processed_data.append(processed_row)
                 
                 # Commit to database
-                db.commit()
+                try:
+                    db.commit()
+                    logger.info(f"Committed {len(processed_data)} master records to database")
+                except Exception as commit_error:
+                    db.rollback()
+                    logger.error(f"Error committing master data: {str(commit_error)}", exc_info=True)
+                    raise Exception(f"Database commit failed: {str(commit_error)}")
                 
                 # Do not create a RecentUpload here; analysis endpoint will create one
                 
             except Exception as e:
                 db.rollback()
+                logger.error(f"Error processing master data rows: {str(e)}", exc_info=True)
                 raise e
             finally:
                 db.close()
