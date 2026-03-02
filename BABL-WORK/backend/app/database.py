@@ -389,6 +389,11 @@ Index('idx_split_rule_lookup', MasterSplitRule.pharmacy_id, MasterSplitRule.prod
 # Full-text search index for pharmacy names (regular B-tree, GIN requires operator class for VARCHAR)
 Index('idx_pharmacy_name_fts', MasterMapping.pharmacy_names)
 
+# Composite indexes for common query patterns (improves join and filter performance)
+Index('idx_pharmacy_product', MasterMapping.pharmacy_id, MasterMapping.product_id)
+Index('idx_pharmacy_product_names', MasterMapping.pharmacy_id, MasterMapping.product_names)
+Index('idx_user_invoice', Invoice.user_id, Invoice.invoice_date)
+
 # Database dependency
 def get_db():
     """Get database session"""
