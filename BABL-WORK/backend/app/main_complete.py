@@ -29,30 +29,16 @@ app = FastAPI(
 )
 
 # Ensure DB tables and critical schema adjustments are present on startup
-# Global flag to ensure migration runs only once across all workers
-_migration_lock = None
-_migration_done = False
-
 @app.on_event("startup")
 async def _startup_db_prepare():
     # Run database migration to update column sizes if needed (for existing databases)
-    # Use a simple check to avoid running on every worker - migration is idempotent anyway
-    global _migration_done
-    
-    if _migration_done:
-        logger.debug("Migration already completed, skipping")
-        return
-    
     try:
         from app.migrate_schema import migrate_master_mapping_columns
-        logger.info("Running database schema migration (if needed)...")
-        # Migration now checks if already done internally, so it's safe to call multiple times
+        logger.info("Running database schema migration...")
         migrate_master_mapping_columns()
-        _migration_done = True
-        logger.info("Database schema migration check completed")
+        logger.info("Database schema migration completed")
     except Exception as e:
-        logger.warning(f"Schema migration check failed (non-critical): {str(e)}")
-        # Don't fail startup - migration is idempotent and will retry next time if needed
+        logger.error(f"Schema migration failed: {str(e)}", exc_info=True)
     
     # Initialize database with retry logic
     import asyncio
@@ -1223,11 +1209,15 @@ async def upload_master(file: UploadFile = File(...), current_user: User = Depen
         
         # Clear existing master data before processing new file
         from app.database import get_db, MasterMapping
+        from app.cache import clear_master_data_cache
+        
         db = next(get_db())
         try:
             deleted_count = db.query(MasterMapping).delete()
             db.commit()
             logger.info(f"Cleared {deleted_count} existing master data records")
+            # Clear cache when master data is updated
+            clear_master_data_cache()
         except Exception as e:
             logger.warning(f"Error clearing existing master data: {str(e)}")
             db.rollback()
@@ -1344,8 +1334,37 @@ async def analyze_data(current_user: User = Depends(get_current_user)):
         
         # Get data from database - filter by user_id to get only current user's data
         user_id = current_user.id if hasattr(current_user, 'id') else 1
+        
+        # Use cached master data if available
+        from app.cache import get_cached_master_data, set_master_data_cache
+        
+        cached_master = get_cached_master_data()
+        if cached_master:
+            logger.info("Using cached master data for analysis")
+            master_records = cached_master
+        else:
+            # Load from database and cache it
+            logger.info("Loading master data from database (will cache)")
+            master_records_db = db.query(MasterMapping).all()
+            # Convert to dict format for caching
+            master_records = []
+            for record in master_records_db:
+                master_records.append({
+                    'Pharmacy_Names': record.pharmacy_names,
+                    'Product_Names': record.product_names,
+                    'Product_ID': record.product_id,
+                    'Product_Price': record.product_price,
+                    'Doctor_Names': record.doctor_names,
+                    'Doctor_ID': record.doctor_id,
+                    'REP_Names': record.rep_names,
+                    'HQ': record.hq,
+                    'AREA': record.area,
+                    'Generated_Pharmacy_ID': record.pharmacy_id
+                })
+            set_master_data_cache(master_records)
+        
+        # Load invoice records (user-specific, don't cache)
         invoice_records = db.query(Invoice).filter(Invoice.user_id == user_id).all()
-        master_records = db.query(MasterMapping).all()  # Master data is shared across users
         
         logger.info(f"Found {len(invoice_records)} invoice records and {len(master_records)} master records for analysis")
         
@@ -1374,20 +1393,25 @@ async def analyze_data(current_user: User = Depends(get_current_user)):
                 'Generated_Pharmacy_ID': record.pharmacy_id
             })
         
-        master_data = []
-        for record in master_records:
-            master_data.append({
-                'Pharmacy_Names': record.pharmacy_names,
-                'Product_Names': record.product_names,
-                'Product_ID': record.product_id,
-                'Product_Price': record.product_price,
-                'Doctor_Names': record.doctor_names,
-                'Doctor_ID': record.doctor_id,
-                'REP_Names': record.rep_names,
-                'HQ': record.hq,
-                'AREA': record.area,
-                'Generated_Pharmacy_ID': record.pharmacy_id
-            })
+        # If master_records is already in dict format (from cache), use directly
+        if master_records and isinstance(master_records[0], dict):
+            master_data = master_records
+        else:
+            # Convert from ORM objects to dicts
+            master_data = []
+            for record in master_records:
+                master_data.append({
+                    'Pharmacy_Names': record.pharmacy_names,
+                    'Product_Names': record.product_names,
+                    'Product_ID': record.product_id,
+                    'Product_Price': record.product_price,
+                    'Doctor_Names': record.doctor_names,
+                    'Doctor_ID': record.doctor_id,
+                    'REP_Names': record.rep_names,
+                    'HQ': record.hq,
+                    'AREA': record.area,
+                    'Generated_Pharmacy_ID': record.pharmacy_id
+                })
         
         invoice_df = pd.DataFrame(invoice_data)
         master_df = pd.DataFrame(master_data)
@@ -5582,8 +5606,20 @@ async def get_duplicate_master_combinations(current_user: User = Depends(get_cur
         
         db = next(get_db())
         
-        # Get all master records
-        all_records = db.query(MasterMapping).all()
+        # Use cached master data if available
+        from app.cache import get_cached_master_data
+        
+        cached_master = get_cached_master_data()
+        if cached_master:
+            # Convert cached dicts back to a format we can use
+            all_records = cached_master
+            # We'll need to adapt the code below to work with dicts
+            # For now, fall back to DB query if cache format doesn't match
+            if not isinstance(all_records[0] if all_records else None, dict):
+                all_records = db.query(MasterMapping).all()
+        else:
+            # Get all master records from database
+            all_records = db.query(MasterMapping).all()
         
         # Group by pharmacy_id + normalized_product
         combinations = {}
