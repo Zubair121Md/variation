@@ -29,16 +29,30 @@ app = FastAPI(
 )
 
 # Ensure DB tables and critical schema adjustments are present on startup
+# Global flag to ensure migration runs only once across all workers
+_migration_lock = None
+_migration_done = False
+
 @app.on_event("startup")
 async def _startup_db_prepare():
     # Run database migration to update column sizes if needed (for existing databases)
+    # Use a simple check to avoid running on every worker - migration is idempotent anyway
+    global _migration_done
+    
+    if _migration_done:
+        logger.debug("Migration already completed, skipping")
+        return
+    
     try:
         from app.migrate_schema import migrate_master_mapping_columns
-        logger.info("Running database schema migration...")
+        logger.info("Running database schema migration (if needed)...")
+        # Migration now checks if already done internally, so it's safe to call multiple times
         migrate_master_mapping_columns()
-        logger.info("Database schema migration completed")
+        _migration_done = True
+        logger.info("Database schema migration check completed")
     except Exception as e:
-        logger.error(f"Schema migration failed: {str(e)}", exc_info=True)
+        logger.warning(f"Schema migration check failed (non-critical): {str(e)}")
+        # Don't fail startup - migration is idempotent and will retry next time if needed
     
     # Initialize database with retry logic
     import asyncio

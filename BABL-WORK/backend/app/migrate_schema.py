@@ -7,10 +7,13 @@ from sqlalchemy import create_engine, text
 from app.database import DATABASE_URL
 
 def migrate_master_mapping_columns():
-    """Update column sizes in prms_master_mapping table"""
+    """Update column sizes in prms_master_mapping table - runs only if needed"""
     if DATABASE_URL.startswith("sqlite"):
         # SQLite doesn't need migration - it's more flexible with VARCHAR
         return
+    
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
         engine = create_engine(DATABASE_URL)
@@ -27,6 +30,22 @@ def migrate_master_mapping_columns():
             
             if not table_exists:
                 # Table doesn't exist yet, will be created with correct schema
+                logger.debug("Table prms_master_mapping doesn't exist yet, skipping migration")
+                return
+            
+            # Check if migration is already done by checking column sizes
+            # If pharmacy_names is already VARCHAR(500), migration is done
+            result = conn.execute(text("""
+                SELECT character_maximum_length 
+                FROM information_schema.columns 
+                WHERE table_name = 'prms_master_mapping' 
+                AND column_name = 'pharmacy_names'
+            """))
+            col_size = result.scalar()
+            
+            if col_size and col_size >= 500:
+                # Migration already done, skip
+                logger.debug(f"Migration already completed (pharmacy_names is VARCHAR({col_size}))")
                 return
         
         migrations = [
@@ -45,13 +64,11 @@ def migrate_master_mapping_columns():
             ("ALTER TABLE prms_master_mapping ALTER COLUMN area SET DEFAULT ''", "area_default"),
         ]
         
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info("Starting database schema migration for master_mapping table...")
         
         # Use autocommit mode for DDL statements (ALTER TABLE requires autocommit in some PostgreSQL setups)
         # Create engine with autocommit for DDL
-        ddl_engine = create_engine(DATABASE_URL, isolation_level="AUTOCOMMIT")
+        ddl_engine = create_engine(DATABASE_URL, isolation_level="AUTOCOMMIT", pool_pre_ping=True, pool_recycle=300)
         
         success_count = 0
         error_count = 0
@@ -72,7 +89,7 @@ def migrate_master_mapping_columns():
                         success_count += 1  # Count as success since it's already correct
                     else:
                         # Log other errors but continue
-                        logger.error(f"❌ Migration error for {column_name}: {str(e)}", exc_info=True)
+                        logger.warning(f"❌ Migration error for {column_name}: {str(e)}")
                         error_count += 1
         
         logger.info(f"Migration completed: {success_count} successful, {error_count} errors")

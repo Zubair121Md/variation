@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     buildCommand: cd BABL-WORK/backend && pip install -r requirements.txt
-    startCommand: cd BABL-WORK/backend && gunicorn app.main_complete:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    startCommand: cd BABL-WORK/backend && gunicorn app.main_complete:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300 --graceful-timeout 30
     envVars:
       - key: DATABASE_URL
         sync: false
