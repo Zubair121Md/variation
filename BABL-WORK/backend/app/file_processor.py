@@ -392,17 +392,30 @@ class FileProcessor:
                     
                     # Store in database if valid
                     if not validation_errors or all(error["row"] != index + 2 for error in validation_errors):
+                        # CRITICAL: Truncate to OLD database limits (50) as safety fallback
+                        # This ensures compatibility even if migration hasn't run
+                        # After migration succeeds, these will be updated to larger sizes
+                        safe_pharmacy_id = str(processed_row["pharmacy_id"]).replace('-', '_')[:50]
+                        safe_pharmacy_names = str(processed_row["pharmacy_name"])[:50]
+                        safe_product_names = str(processed_row["product_name"])[:50]
+                        safe_product_id = str(processed_row["product_id"])[:50] if processed_row["product_id"] else None
+                        safe_doctor_names = str(processed_row["doctor_name"])[:50]
+                        safe_doctor_id = str(processed_row["doctor_id"])[:50]
+                        safe_rep_names = str(processed_row["rep_name"])[:50]
+                        safe_hq = str(processed_row["hq"])[:50] if processed_row["hq"] else ""
+                        safe_area = str(processed_row["area"])[:50] if processed_row["area"] else ""
+                        
                         master_record = MasterMapping(
-                            pharmacy_id=processed_row["pharmacy_id"].replace('-', '_')[:100],  # Truncate to 100
-                            pharmacy_names=processed_row["pharmacy_name"][:500],  # Truncate to 500
-                            product_names=processed_row["product_name"][:300],  # Truncate to 300
-                            product_id=processed_row["product_id"][:100] if processed_row["product_id"] else None,  # Truncate to 100
+                            pharmacy_id=safe_pharmacy_id,
+                            pharmacy_names=safe_pharmacy_names,
+                            product_names=safe_product_names,
+                            product_id=safe_product_id,
                             product_price=processed_row["product_price"],
-                            doctor_names=processed_row["doctor_name"][:200],  # Truncate to 200
-                            doctor_id=processed_row["doctor_id"][:100],  # Truncate to 100
-                            rep_names=processed_row["rep_name"][:200],  # Truncate to 200
-                            hq=processed_row["hq"][:100] if processed_row["hq"] else "",  # Ensure not None, truncate to 100
-                            area=processed_row["area"][:200] if processed_row["area"] else ""  # Ensure not None, truncate to 200
+                            doctor_names=safe_doctor_names,
+                            doctor_id=safe_doctor_id,
+                            rep_names=safe_rep_names,
+                            hq=safe_hq,
+                            area=safe_area
                         )
                         db.add(master_record)
                     
