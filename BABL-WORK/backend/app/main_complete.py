@@ -6170,7 +6170,7 @@ async def get_master_data_unique_values(current_user: User = Depends(get_current
         
         db.close()
         
-        return {
+        result = {
             "pharmacy_ids": unique_pharmacy_ids,
             "pharmacy_names": unique_pharmacy_names,
             "product_names": unique_product_names,
@@ -6189,6 +6189,12 @@ async def get_master_data_unique_values(current_user: User = Depends(get_current
                 "doctor_id_to_name": doctor_id_to_name,
             }
         }
+        
+        # Cache the result
+        from app.cache import set_unique_values_cache
+        set_unique_values_cache(result)
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error getting unique values: {str(e)}")
