@@ -340,6 +340,8 @@ class FileProcessor:
                 validation_errors = []
                 
                 for index, row in df.iterrows():
+                    # Truncate to safe limits (matching old DB schema as fallback)
+                    # Migration will update DB, but this ensures compatibility
                     processed_row = {
                         "rep_name": (str(row['REP_Names']).strip()[:200] if pd.notna(row['REP_Names']) else ""),
                         "doctor_name": (str(row['Doctor_Names']).strip()[:200] if pd.notna(row['Doctor_Names']) else ""),
@@ -353,6 +355,18 @@ class FileProcessor:
                         "area": (str(row['AREA']).strip()[:200] if pd.notna(row['AREA']) else ""),
                         "row_index": index + 2
                     }
+                    
+                    # Additional safety: ensure all strings are within old limits as absolute fallback
+                    # This prevents errors if migration hasn't run yet
+                    processed_row["rep_name"] = processed_row["rep_name"][:200]
+                    processed_row["doctor_name"] = processed_row["doctor_name"][:200]
+                    processed_row["doctor_id"] = processed_row["doctor_id"][:100]
+                    processed_row["pharmacy_name"] = processed_row["pharmacy_name"][:500]
+                    processed_row["pharmacy_id"] = processed_row["pharmacy_id"][:100]
+                    processed_row["product_name"] = processed_row["product_name"][:300]
+                    processed_row["product_id"] = processed_row["product_id"][:100] if processed_row["product_id"] else None
+                    processed_row["hq"] = processed_row["hq"][:100] if processed_row["hq"] else ""
+                    processed_row["area"] = processed_row["area"][:200] if processed_row["area"] else ""
                     
                     # Validate required fields
                     if not processed_row["pharmacy_name"]:
