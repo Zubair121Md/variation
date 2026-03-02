@@ -5353,7 +5353,7 @@ async def get_pharmacy_products(
 @app.get("/api/v1/master-data")
 async def get_master_data(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,  # Increased default limit for better UX
     current_user: User = Depends(get_current_user)
 ):
     """Get all master data with pagination"""
@@ -5361,11 +5361,18 @@ async def get_master_data(
         from app.database import get_db, MasterMapping
         db = next(get_db())
         
-        # Get total count
-        total = db.query(MasterMapping).count()
+        # Get total count (use cache if available)
+        from app.cache import get_cached_master_count, set_master_count_cache
         
-        # Get paginated data
-        master_records = db.query(MasterMapping).offset(skip).limit(limit).all()
+        cached_count = get_cached_master_count()
+        if cached_count is not None:
+            total = cached_count
+        else:
+            total = db.query(MasterMapping).count()
+            set_master_count_cache(total)
+        
+        # Get paginated data with optimized query
+        master_records = db.query(MasterMapping).order_by(MasterMapping.id).offset(skip).limit(limit).all()
         
         result = []
         for record in master_records:
@@ -5428,6 +5435,10 @@ async def create_master_data(
         db.add(new_record)
         db.commit()
         db.refresh(new_record)
+        
+        # Clear cache when master data is created
+        from app.cache import clear_master_data_cache
+        clear_master_data_cache()
         
         return {
             "id": new_record.id,
@@ -6093,6 +6104,15 @@ async def get_master_data_unique_values(current_user: User = Depends(get_current
         
         db = next(get_db())
         
+        # Use cached unique values if available
+        from app.cache import get_cached_unique_values, set_unique_values_cache
+        
+        cached_unique = get_cached_unique_values()
+        if cached_unique:
+            logger.info("Using cached unique values")
+            db.close()
+            return cached_unique
+        
         # Get all records to build mappings
         all_records = db.query(MasterMapping).all()
         
@@ -6628,7 +6648,7 @@ async def upload_product_reference(
 @app.get("/api/v1/products")
 async def get_products(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,  # Increased default limit for better UX
     current_user: User = Depends(get_current_user)
 ):
     """Get all products with pagination"""
