@@ -962,7 +962,22 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                 # Log why it didn't match for debugging
                 # Try fuzzy pharmacy matching one more time as a last resort
                 if matched_pharmacy_id == normalized_id:
-                    fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data, db)
+                    # Use master_data_orm if it exists, otherwise convert master_data
+                    if 'master_data_orm' in locals():
+                        fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data_orm, db)
+                    else:
+                        # Convert dict records to ORM-like objects
+                        master_data_orm_local = []
+                        for rec in master_data:
+                            if isinstance(rec, dict):
+                                class RecordObj:
+                                    def __init__(self, d):
+                                        for k, v in d.items():
+                                            setattr(self, k, v)
+                                master_data_orm_local.append(RecordObj(rec))
+                            else:
+                                master_data_orm_local.append(rec)
+                        fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data_orm_local, db)
                     if fuzzy_pharmacy_match:
                         matched_pharmacy_id, sample_record = fuzzy_pharmacy_match
                         sample_pharmacy_name = sample_record.pharmacy_names if hasattr(sample_record, 'pharmacy_names') else sample_record.get('pharmacy_names', '')
