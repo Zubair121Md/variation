@@ -2424,6 +2424,21 @@ async def get_audit_logs(current_user: User = Depends(get_current_user)):
         {"action": "data_export", "user": "admin", "timestamp": "2024-01-15T14:20:00Z"}
     ]
 
+@app.get("/api/v1/debug/cache-stats")
+async def get_cache_stats_endpoint(current_user: User = Depends(get_current_user)):
+    """Get cache statistics for debugging"""
+    try:
+        from app.cache import get_cache_stats
+        stats = get_cache_stats()
+        return {
+            "success": True,
+            "cache_stats": stats,
+            "message": "Cache statistics retrieved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting cache stats: {str(e)}")
+
 # Unmatched records endpoints
 @app.get("/api/v1/unmatched")
 async def get_unmatched_records(current_user: User = Depends(get_current_user)):
