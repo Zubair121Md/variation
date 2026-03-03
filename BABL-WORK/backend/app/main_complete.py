@@ -1335,16 +1335,16 @@ async def analyze_data(current_user: User = Depends(get_current_user)):
         # Get data from database - filter by user_id to get only current user's data
         user_id = current_user.id if hasattr(current_user, 'id') else 1
         
-        # Use cached master data if available
+        # Use cached master data with hash indexes if available
         from app.cache import get_cached_master_data, set_master_data_cache
         
         cached_master = get_cached_master_data()
         if cached_master:
-            logger.info("Using cached master data for analysis")
+            logger.info("Using cached master data with hash indexes for analysis")
             master_records = cached_master
         else:
-            # Load from database and cache it
-            logger.info("Loading master data from database (will cache)")
+            # Load from database and cache it with hash indexes
+            logger.info("Loading master data from database (will cache with hash indexes)")
             master_records_db = db.query(MasterMapping).all()
             # Convert to dict format for caching
             master_records = []
@@ -1361,7 +1361,7 @@ async def analyze_data(current_user: User = Depends(get_current_user)):
                     'AREA': record.area,
                     'Generated_Pharmacy_ID': record.pharmacy_id
                 })
-            set_master_data_cache(master_records)
+            set_master_data_cache(master_records)  # This will also build hash indexes
         
         # Load invoice records (user-specific, don't cache)
         invoice_records = db.query(Invoice).filter(Invoice.user_id == user_id).all()

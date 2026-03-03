@@ -551,10 +551,44 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
         else:
             logger.warning("Product reference table is empty, falling back to exact string matching")
         
-        # Get all master data and create lookup by pharmacy_id + product
-        master_data = db.query(MasterMapping).all()
+        # PERFORMANCE OPTIMIZATION: Use hash-based cache for master data
+        from app.cache import get_cached_master_data, set_master_data_cache, get_master_by_pharmacy_product
+        
+        cached_master = get_cached_master_data()
+        if cached_master:
+            logger.info("Using cached master data with hash indexes for matching")
+            # Convert cached dicts back to ORM-like objects for compatibility
+            master_data = cached_master
+        else:
+            # Load from database and cache it
+            logger.info("Loading master data from database (will cache with hash indexes)")
+            master_data_db = db.query(MasterMapping).all()
+            # Convert to dict format for caching
+            master_data = []
+            for record in master_data_db:
+                master_data.append({
+                    'id': record.id,
+                    'pharmacy_id': record.pharmacy_id,
+                    'pharmacy_names': record.pharmacy_names,
+                    'product_names': record.product_names,
+                    'product_id': record.product_id,
+                    'product_price': record.product_price,
+                    'doctor_names': record.doctor_names,
+                    'doctor_id': record.doctor_id,
+                    'rep_names': record.rep_names,
+                    'hq': record.hq,
+                    'area': record.area
+                })
+            set_master_data_cache(master_data)  # This builds hash indexes
+        
         master_lookup = {}  # Key: lookup_key, Value: list of master records
-        master_record_map = {record.id: record for record in master_data}  # For quick lookups by ID
+        master_record_map = {}  # For quick lookups by ID
+        
+        # Build master_record_map from cached data
+        for record in master_data:
+            record_id = record.get('id') if isinstance(record, dict) else getattr(record, 'id', None)
+            if record_id:
+                master_record_map[record_id] = record
         
         # PERFORMANCE OPTIMIZATION: Pre-normalize all pharmacy IDs once
         pharmacy_id_normalization_cache = {}
@@ -563,19 +597,27 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
         # 1. By pharmacy_id + normalized product name (exact)
         # 2. By pharmacy_id + product_id (from reference table)
         for record in master_data:
+            # Handle both dict and ORM object formats
+            if isinstance(record, dict):
+                pharmacy_id = record.get('pharmacy_id', '')
+                product_names = record.get('product_names', '')
+            else:
+                pharmacy_id = getattr(record, 'pharmacy_id', '')
+                product_names = getattr(record, 'product_names', '')
+            
             # Exact match lookup
             # CRITICAL: Normalize master pharmacy_id to ensure consistent matching
             # Master data may have dashes or underscores, normalize to underscores
             # PERFORMANCE: Use cached normalization
-            if record.pharmacy_id not in pharmacy_id_normalization_cache:
-                pharmacy_id_normalization_cache[record.pharmacy_id] = str(record.pharmacy_id).replace('-', '_')
-            normalized_master_pharmacy_id = pharmacy_id_normalization_cache[record.pharmacy_id]
-            normalized_product = cached_normalize_product_name(record.product_names)
+            if pharmacy_id not in pharmacy_id_normalization_cache:
+                pharmacy_id_normalization_cache[pharmacy_id] = str(pharmacy_id).replace('-', '_')
+            normalized_master_pharmacy_id = pharmacy_id_normalization_cache[pharmacy_id]
+            normalized_product = cached_normalize_product_name(product_names)
             key_exact = f"{normalized_master_pharmacy_id}|EXACT|{normalized_product}"
             # #region agent log
             try:
                 with open('/Users/zubairishaq/Desktop/babl/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({"location":"tasks_enhanced.py:541","message":"Creating master lookup key","data":{"original_pharmacy_id":record.pharmacy_id,"normalized_pharmacy_id":normalized_master_pharmacy_id,"original_product":record.product_names[:50],"normalized_product":normalized_product[:50],"lookup_key":key_exact[:100],"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"E"})+'\n')
+                    f.write(json.dumps({"location":"tasks_enhanced.py:541","message":"Creating master lookup key","data":{"original_pharmacy_id":pharmacy_id,"normalized_pharmacy_id":normalized_master_pharmacy_id,"original_product":product_names[:50],"normalized_product":normalized_product[:50],"lookup_key":key_exact[:100],"function":"merge_invoice_with_master"},"timestamp":int(__import__('time').time()*1000),"runId":"run1","hypothesisId":"E"})+'\n')
             except: pass
             # #endregion
             if key_exact not in master_lookup:
@@ -586,16 +628,16 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
             # PERFORMANCE: Use cached product ID generation
             if use_product_matching:
                 try:
-                    product_id, _, matched_original = cached_generate_product_id(record.product_names)
+                    product_id, _, matched_original = cached_generate_product_id(product_names)
                     if product_id:
                         # Use normalized pharmacy_id for consistency
                         key_fuzzy = f"{normalized_master_pharmacy_id}|PID|{product_id}"
                         if key_fuzzy not in master_lookup:
                             master_lookup[key_fuzzy] = []
                         master_lookup[key_fuzzy].append(record)
-                        logger.debug(f"Master product '{record.product_names}' -> Product ID {product_id} (matched: '{matched_original}')")
+                        logger.debug(f"Master product '{product_names}' -> Product ID {product_id} (matched: '{matched_original}')")
                 except Exception as e:
-                    logger.debug(f"Could not match master product '{record.product_names}' to reference: {str(e)}")
+                    logger.debug(f"Could not match master product '{product_names}' to reference: {str(e)}")
         
         logger.info(f"Created master lookup with {len(master_lookup)} pharmacy+product combinations")
         
@@ -641,7 +683,19 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
             
             # Strategy 2: If exact pharmacy_id match failed, try fuzzy pharmacy name matching
             if not master_records:
-                fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data, db)
+                # Convert dict records to ORM-like objects for find_best_matching_pharmacy compatibility
+                master_data_orm = []
+                for rec in master_data:
+                    if isinstance(rec, dict):
+                        # Create a simple object-like structure
+                        class RecordObj:
+                            def __init__(self, d):
+                                for k, v in d.items():
+                                    setattr(self, k, v)
+                        master_data_orm.append(RecordObj(rec))
+                    else:
+                        master_data_orm.append(rec)
+                fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data_orm, db)
                 if fuzzy_pharmacy_match:
                     matched_pharmacy_id, sample_record = fuzzy_pharmacy_match
                     # CRITICAL: Normalize the matched pharmacy_id to ensure consistent lookup
@@ -659,7 +713,9 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                     if master_records:
                         match_method = "exact_pharmacy_fuzzy"
                         matched_pharmacy_id = normalized_matched_pharmacy_id  # Update for invoice creation
-                        logger.info(f"Matched pharmacy via fuzzy name: '{pharmacy_name}' (generated: {normalized_id}) -> '{sample_record.pharmacy_names}' (matched: {matched_pharmacy_id})")
+                        # Handle both dict and ORM object formats
+                        sample_pharmacy_name = sample_record.pharmacy_names if hasattr(sample_record, 'pharmacy_names') else sample_record.get('pharmacy_names', '')
+                        logger.info(f"Matched pharmacy via fuzzy name: '{pharmacy_name}' (generated: {normalized_id}) -> '{sample_pharmacy_name}' (matched: {matched_pharmacy_id})")
                 
                 # NEW: Also try matching with the original generated_id (for variant mappings)
                 # This handles cases where manual mappings created variant mappings with the original generated_id
