@@ -552,11 +552,15 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
             logger.warning("Product reference table is empty, falling back to exact string matching")
         
         # PERFORMANCE OPTIMIZATION: Use hash-based cache for master data
-        from app.cache import get_cached_master_data, set_master_data_cache, get_master_by_pharmacy_product
+        from app.cache import get_cached_master_data, set_master_data_cache, get_master_by_pharmacy_product, get_cache_stats
         
         cached_master = get_cached_master_data()
         if cached_master:
             logger.info("Using cached master data with hash indexes for matching")
+            cache_stats = get_cache_stats()
+            logger.info(f"Cache stats: {cache_stats['master_data_count']} records, "
+                       f"{cache_stats['pharmacy_index_size']} pharmacies indexed, "
+                       f"age: {cache_stats['cache_age_seconds']:.1f}s")
             # Convert cached dicts back to ORM-like objects for compatibility
             master_data = cached_master
         else:
@@ -580,6 +584,9 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                     'area': record.area
                 })
             set_master_data_cache(master_data)  # This builds hash indexes
+            cache_stats = get_cache_stats()
+            logger.info(f"Cache built: {cache_stats['master_data_count']} records, "
+                       f"{cache_stats['pharmacy_index_size']} pharmacies indexed")
         
         master_lookup = {}  # Key: lookup_key, Value: list of master records
         master_record_map = {}  # For quick lookups by ID

@@ -224,3 +224,25 @@ def set_unique_values_cache(data: Dict[str, Any]):
     global _unique_values_cache, _unique_values_cache_time
     _unique_values_cache = data
     _unique_values_cache_time = time.time()
+
+def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics for debugging and monitoring"""
+    global _master_data_cache, _master_data_cache_time, _master_index_time
+    global _master_by_pharmacy_id, _master_by_product_id, _master_by_pharmacy_product
+    
+    now = time.time()
+    cache_age = now - _master_data_cache_time if _master_data_cache_time > 0 else 0
+    index_age = now - _master_index_time if _master_index_time > 0 else 0
+    
+    return {
+        "master_data_cached": _master_data_cache is not None,
+        "master_data_count": len(_master_data_cache) if _master_data_cache else 0,
+        "pharmacy_index_size": len(_master_by_pharmacy_id),
+        "product_index_size": len(_master_by_product_id),
+        "composite_index_size": len(_master_by_pharmacy_product),
+        "pharmacy_name_index_size": len(_master_by_pharmacy_name),
+        "cache_age_seconds": round(cache_age, 2),
+        "index_age_seconds": round(index_age, 2),
+        "cache_expired": cache_age > _master_data_cache_timeout if _master_data_cache_time > 0 else True,
+        "index_expired": index_age > _master_index_timeout if _master_index_time > 0 else True
+    }
