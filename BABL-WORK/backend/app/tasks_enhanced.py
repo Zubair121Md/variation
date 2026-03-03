@@ -762,7 +762,8 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                                 master_records = master_lookup.get(lookup_key_fuzzy, [])
                                 if master_records:
                                     match_method = "fuzzy_pharmacy_and_product"
-                                    logger.info(f"Matched via fuzzy pharmacy + fuzzy product: '{pharmacy_name}' -> '{sample_record.pharmacy_names}' (ID: {matched_pharmacy_id}), product '{row['product']}' -> '{matched_original}'")
+                                    sample_pharmacy_name = sample_record.pharmacy_names if hasattr(sample_record, 'pharmacy_names') else sample_record.get('pharmacy_names', '')
+                                    logger.info(f"Matched via fuzzy pharmacy + fuzzy product: '{pharmacy_name}' -> '{sample_pharmacy_name}' (ID: {matched_pharmacy_id}), product '{row['product']}' -> '{matched_original}'")
                     else:
                         logger.debug(f"Could not find product ID for invoice product '{row['product']}' in reference table")
                 except Exception as e:
@@ -964,7 +965,8 @@ def merge_invoice_with_master(df: pd.DataFrame, user_id: int, db: Session) -> Tu
                     fuzzy_pharmacy_match = find_best_matching_pharmacy(pharmacy_name, normalized_id, master_data, db)
                     if fuzzy_pharmacy_match:
                         matched_pharmacy_id, sample_record = fuzzy_pharmacy_match
-                        logger.warning(f"Unmatched: {pharmacy_name} + '{row['product']}' - Found similar pharmacy '{sample_record.pharmacy_names}' (ID: {matched_pharmacy_id}) but no matching product")
+                        sample_pharmacy_name = sample_record.pharmacy_names if hasattr(sample_record, 'pharmacy_names') else sample_record.get('pharmacy_names', '')
+                        logger.warning(f"Unmatched: {pharmacy_name} + '{row['product']}' - Found similar pharmacy '{sample_pharmacy_name}' (ID: {matched_pharmacy_id}) but no matching product")
                 
                 if use_product_matching:
                     try:
